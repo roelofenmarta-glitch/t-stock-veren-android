@@ -1,4 +1,4 @@
-name: Android APK V10.2
+name: Android APK V10.2.1
 
 on:
   workflow_dispatch:
@@ -38,20 +38,33 @@ jobs:
           echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/tstock-release.jks"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/tstock-release.jks" >> "$GITHUB_ENV"
 
+      - name: Oude WebView-bestanden opruimen
+        run: |
+          # Deze bestanden kunnen zijn blijven staan wanneer V10.2 over V10.1
+          # in een bestaande GitHub-repository is geupload. De native Compose-app
+          # gebruikt ze niet en Android resource linking faalt er anders op.
+          rm -rf android/app/src/main/res/layout
+          rm -rf android/app/src/main/res/menu
+          rm -rf android/app/src/main/res/xml
+          rm -rf android/app/src/main/res/values-night
+          rm -f android/app/src/main/res/drawable/ic_refresh.xml
+          rm -f android/app/src/main/res/drawable/ic_scan.xml
+          rm -f android/app/src/main/res/drawable/ic_server.xml
+
       - name: APK bouwen
         run: |
           if [ -n "${ANDROID_KEYSTORE_PATH:-}" ]; then
             gradle -p android --no-daemon clean assembleRelease
-            cp android/app/build/outputs/apk/release/app-release.apk android/t-stock-veren-v10.2.apk
+            cp android/app/build/outputs/apk/release/app-release.apk android/t-stock-veren-v10.2.1.apk
           else
             echo "Geen signing secrets gevonden: debug APK voor test wordt gebouwd."
             gradle -p android --no-daemon clean assembleDebug
-            cp android/app/build/outputs/apk/debug/app-debug.apk android/t-stock-veren-v10.2-debug.apk
+            cp android/app/build/outputs/apk/debug/app-debug.apk android/t-stock-veren-v10.2.1-debug.apk
           fi
 
       - name: APK publiceren als artifact
         uses: actions/upload-artifact@v4
         with:
-          name: T-Stock-Veren-V10.2-Android
-          path: android/t-stock-veren-v10.2*.apk
+          name: T-Stock-Veren-V10.2.1-Android
+          path: android/t-stock-veren-v10.2.1*.apk
           retention-days: 30

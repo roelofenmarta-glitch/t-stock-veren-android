@@ -52,3 +52,13 @@ Zonder deze secrets wordt een debug-APK gebouwd, bedoeld voor testen.
 De Android-app vereist de mobiele API van het complete V10.2-serverpakket. Vul bij de eerste start bijvoorbeeld in:
 
 `http://192.168.2.126:8080`
+
+## V10.2.1 buildcorrectie
+
+Wanneer V10.2 in een bestaande V10.1 GitHub-repository is geüpload, kunnen oude WebView-resources blijven staan (`activity_main.xml` en `main_menu.xml`). De workflow verwijdert deze bestanden nu automatisch vóór de Gradle-build.
+
+Lokaal kan dezelfde opschoning worden uitgevoerd met:
+
+```bash
+./scripts/cleanup-old-webview-files.sh
+```
