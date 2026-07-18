@@ -62,3 +62,14 @@ Lokaal kan dezelfde opschoning worden uitgevoerd met:
 ```bash
 ./scripts/cleanup-old-webview-files.sh
 ```
+
+## V10.2.2 buildcorrectie
+
+Deze versie voegt de ontbrekende Compose-import toe in `MainActivity.kt`:
+
+```kotlin
+import androidx.activity.compose.setContent
+```
+
+Daarmee wordt `setContent { ... }` correct herkend door de Kotlin-compiler. De eerdere fout
+`Unresolved reference: setContent` is hiermee verholpen.

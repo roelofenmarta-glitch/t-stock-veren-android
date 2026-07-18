@@ -1,4 +1,4 @@
-name: Android APK V10.2.1
+name: Android APK V10.2.2
 
 on:
   workflow_dispatch:
@@ -55,16 +55,16 @@ jobs:
         run: |
           if [ -n "${ANDROID_KEYSTORE_PATH:-}" ]; then
             gradle -p android --no-daemon clean assembleRelease
-            cp android/app/build/outputs/apk/release/app-release.apk android/t-stock-veren-v10.2.1.apk
+            cp android/app/build/outputs/apk/release/app-release.apk android/t-stock-veren-v10.2.2.apk
           else
             echo "Geen signing secrets gevonden: debug APK voor test wordt gebouwd."
             gradle -p android --no-daemon clean assembleDebug
-            cp android/app/build/outputs/apk/debug/app-debug.apk android/t-stock-veren-v10.2.1-debug.apk
+            cp android/app/build/outputs/apk/debug/app-debug.apk android/t-stock-veren-v10.2.2-debug.apk
           fi
 
       - name: APK publiceren als artifact
         uses: actions/upload-artifact@v4
         with:
-          name: T-Stock-Veren-V10.2.1-Android
-          path: android/t-stock-veren-v10.2.1*.apk
+          name: T-Stock-Veren-V10.2.2-Android
+          path: android/t-stock-veren-v10.2.2*.apk
           retention-days: 30
