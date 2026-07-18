@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">T-Stock Veren</string>
+    <string name="scan">Scannen</string>
+    <string name="refresh">Vernieuwen</string>
+    <string name="server_settings">Server instellen</string>
+    <string name="server_dialog_title">T-Stock server</string>
+    <string name="server_url_hint">Bijvoorbeeld http://192.168.2.126:8080</string>
+    <string name="save">Opslaan</string>
+    <string name="cancel">Annuleren</string>
+    <string name="invalid_server">Vul een geldig http- of https-adres in.</string>
+    <string name="scan_no_input">Open of selecteer eerst een scanveld in T-Stock.</string>
+    <string name="scan_cancelled">Scannen geannuleerd.</string>
+    <string name="page_unreachable">De T-Stock server is niet bereikbaar. Controleer wifi, IP-adres en poort.</string>
+    <string name="auto_enter">Na een scan automatisch Enter geven</string>
+</resources>

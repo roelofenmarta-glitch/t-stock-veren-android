@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.TStockVeren" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/tstock_navy</item>
+        <item name="colorSecondary">@color/tstock_yellow</item>
+        <item name="android:statusBarColor">@color/tstock_navy</item>
+        <item name="android:navigationBarColor">@color/tstock_navy</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

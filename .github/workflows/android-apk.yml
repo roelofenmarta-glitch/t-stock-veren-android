@@ -1,0 +1,49 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "android/**"
+      - ".github/workflows/android-apk.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Broncode ophalen
+        uses: actions/checkout@v4
+
+      - name: Java 17 instellen
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK instellen
+        uses: android-actions/setup-android@v3
+
+      - name: Android SDK-pakketten installeren
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Gradle instellen
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Debug APK bouwen
+        working-directory: android
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: APK als artifact opslaan
+        uses: actions/upload-artifact@v4
+        with:
+          name: T-Stock-Veren-V10.1-Android
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30

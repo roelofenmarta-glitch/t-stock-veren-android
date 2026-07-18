@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="tstock_navy">#0B1220</color>
+    <color name="tstock_background">#0F172A</color>
+    <color name="tstock_yellow">#FFD21F</color>
+    <color name="tstock_text_muted">#CBD5E1</color>
+</resources>
