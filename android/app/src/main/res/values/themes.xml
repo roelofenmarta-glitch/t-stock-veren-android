@@ -1,10 +1,9 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="Theme.TStockVeren" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/tstock_navy</item>
-        <item name="colorSecondary">@color/tstock_yellow</item>
-        <item name="android:statusBarColor">@color/tstock_navy</item>
-        <item name="android:navigationBarColor">@color/tstock_navy</item>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.TStockVeren" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#0B111C</item>
+        <item name="android:navigationBarColor">#0B111C</item>
+        <item name="android:windowActionModeOverlay">true</item>
     </style>
 </resources>

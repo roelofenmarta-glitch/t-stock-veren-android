@@ -1,0 +1,26 @@
+# Node
+**/node_modules/
+**/dist/
+**/.npm/
+npm-debug.log*
+
+# Android / Gradle
+.gradle/
+**/build/
+*.apk
+*.aab
+*.jks
+*.keystore
+local.properties
+
+# Runtime data
+backups/*.sql*
+mobile-releases/*.apk
+updates/
+.env
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,29 +1,54 @@
-# T-Stock Magazijnbeheer Veren V10
+# T-Stock Veren V10.2 Android
 
-V10 bevat de V9.2 functies plus een duidelijk voorraad-overzicht, tussentijdse telling, jaar telling, printbare tellijsten/rapporten en C-logo/rapport-branding.
+Native Android-app voor **T-Stock Magazijnbeheer Veren V10.2**.
 
-## Installeren
+## Functies
 
-```bash
-cd /opt/magazijnbeheer
-unzip magazijnbeheer_operatorflow_admin_v10_new_install.zip
-cd magazijnbeheer_operatorflow_admin_v10_fresh_install
-./scripts/install-new-v10.sh
+- Native Jetpack Compose-interface, geen WebView als hoofdscherm.
+- Barcode- en QR-scanner.
+- Inboeken met V10 locatieadvies en locatiecontrole.
+- Verplaatsen, uitboeken en voorraad zoeken.
+- SQLite-cache en offline mutatiewachtrij.
+- Synchronisatie met de V10.2-server.
+- Updatecontrole en APK-download vanaf de eigen server.
+
+## GitHub
+
+Upload de inhoud van deze map rechtstreeks naar de hoofdmap van een GitHub-repository. De structuur moet zijn:
+
+```text
+.github/workflows/android-apk.yml
+android/settings.gradle.kts
+android/build.gradle.kts
+android/app/build.gradle.kts
 ```
 
-Open daarna:
+Start daarna:
 
-- Webapp: `http://IP-VAN-DE-VM:8080`
-- Adminer: `http://IP-VAN-DE-VM:8081`
+`Actions → Android APK V10.2 → Run workflow`
 
-Login:
+De artifactnaam is `T-Stock-Veren-V10.2-Android`.
 
-- admin / admin123
-- operator / pincode 0000
-- voorman / pincode 1111
+## Vaste ondertekening
 
-## Database-volume
+Voor updates over een bestaande installatie moet iedere APK dezelfde ondertekeningssleutel gebruiken. Maak de sleutel met:
 
-V10 gebruikt: `magazijnbeheer_v10_postgres_data`.
+```bash
+chmod +x scripts/create-android-keystore.sh
+./scripts/create-android-keystore.sh
+```
 
-Gebruik nooit `docker compose down -v`, `docker volume prune` of `docker system prune --volumes` als je data wilt bewaren.
+Voeg de getoonde waarden toe aan GitHub Actions secrets:
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+Zonder deze secrets wordt een debug-APK gebouwd, bedoeld voor testen.
+
+## Server
+
+De Android-app vereist de mobiele API van het complete V10.2-serverpakket. Vul bij de eerste start bijvoorbeeld in:
+
+`http://192.168.2.126:8080`
