@@ -16,10 +16,29 @@ android {
         applicationId = "nl.tstock.veren"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10203
-        versionName = "10.2.3"
+        versionCode = 10204
+        versionName = "10.2.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
+        manifestPlaceholders["appLabel"] = "T-Stock Veren"
+    }
+
+    flavorDimensions += "channel"
+    productFlavors {
+        create("production") {
+            dimension = "channel"
+            buildConfigField("boolean", "IS_TEST_BUILD", "false")
+            buildConfigField("String", "APP_TITLE", "\"T-Stock Veren\"")
+            manifestPlaceholders["appLabel"] = "T-Stock Veren"
+        }
+        create("beta") {
+            dimension = "channel"
+            applicationIdSuffix = ".test"
+            versionNameSuffix = "-test"
+            buildConfigField("boolean", "IS_TEST_BUILD", "true")
+            buildConfigField("String", "APP_TITLE", "\"T-Stock Veren TEST\"")
+            manifestPlaceholders["appLabel"] = "T-Stock Veren TEST"
+        }
     }
 
     buildFeatures { compose = true; buildConfig = true }

@@ -22,6 +22,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         ?: UUID.randomUUID().toString().also { prefs.edit().putString("device_uuid", it).apply() }
     private val network = NetworkClient { state.serverUrl }
     private var lastForegroundRefreshAt = 0L
+    private var receiveSuggestionConfirmedByServer = false
 
     var state by mutableStateOf(
         AppState(
@@ -205,6 +206,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 receiveSuggestedCode = ""
                 receiveSuggestedName = ""
                 receiveLocationScan = ""
+                receiveSuggestionConfirmedByServer = false
             }
             ScanTarget.RECEIVE_LOCATION -> receiveLocationScan = value.trim().uppercase()
             ScanTarget.FIND_BUNDLE -> {
@@ -223,12 +225,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun suggestLocation() = runTask {
         if (receiveArticle.isBlank()) throw IllegalArgumentException("Scan eerst het artikel.")
+        receiveSuggestionConfirmedByServer = false
         val location = if (state.online) {
             try {
                 network.post(
                     "/api/mobile/suggest-location",
                     JSONObject().put("articleNumber", receiveArticle),
-                ).getJSONObject("suggestedLocation")
+                ).getJSONObject("suggestedLocation").also {
+                    receiveSuggestionConfirmedByServer = true
+                }
             } catch (e: NetworkException) {
                 state = state.copy(online = false)
                 store.suggestLocation(receiveArticle)
@@ -254,6 +259,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             receiveReason,
             user.id,
             deviceUuid,
+            serverConfirmedFree = receiveSuggestionConfirmedByServer && state.online,
         )
         refreshOfflineStats()
         state = state.copy(
@@ -272,6 +278,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         receiveSuggestedCode = ""
         receiveSuggestedName = ""
         receiveLocationScan = ""
+        receiveSuggestionConfirmedByServer = false
     }
 
     fun findBundle() {
@@ -340,6 +347,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         syncAllInternal(showMessage = true)
     }
 
+    fun rebuildOfflineCache() = runTask {
+        if (!state.online) throw IllegalStateException("Maak eerst verbinding met de server.")
+        store.clearCachedServerData()
+        refreshOfflineStats()
+        syncAllInternal(showMessage = true)
+        state = state.copy(message = "Offline cache opnieuw opgebouwd: ${store.locationCount()} locaties geladen.")
+    }
+
     private suspend fun syncAllInternal(showMessage: Boolean) {
         val user = state.user ?: throw IllegalStateException("Log opnieuw in.")
         val pending = store.pendingJson()
@@ -386,6 +401,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun loadUpdateInfo(showCurrentMessage: Boolean) {
+        if (BuildConfig.IS_TEST_BUILD) {
+            state = state.copy(
+                updateInfo = null,
+                message = if (showCurrentMessage) "Dit is de losse testapp. Productie-updates staan hier bewust uit." else state.message,
+            )
+            return
+        }
         val data = network.get("/api/mobile/version")
         val changes = data.optJSONArray("changelog") ?: JSONArray()
         val info = UpdateInfo(

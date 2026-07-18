@@ -9,7 +9,12 @@ import org.json.JSONObject
 import java.time.Instant
 import java.util.UUID
 
-class LocalStore(context: Context) : SQLiteOpenHelper(context, "tstock_veren_v102.db", null, 1) {
+class LocalStore(context: Context) : SQLiteOpenHelper(
+    context,
+    if (BuildConfig.IS_TEST_BUILD) "tstock_veren_v102_test.db" else "tstock_veren_v102.db",
+    null,
+    1,
+) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
         db.execSQL("CREATE TABLE spring_types(code TEXT PRIMARY KEY,json TEXT NOT NULL)")
@@ -160,10 +165,17 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "tstock_veren_v10
         return null
     }
 
-    private fun validateLocation(location: JSONObject, article: Article, requireFree: Boolean = true) {
+    private fun validateLocation(
+        location: JSONObject,
+        article: Article,
+        requireFree: Boolean = true,
+        serverConfirmedFree: Boolean = false,
+    ) {
         if (!location.optBoolean("enabled", true)) throw IllegalStateException("Locatie is uitgeschakeld.")
         if (location.optBoolean("blocked", false)) throw IllegalStateException("Locatie is geblokkeerd.")
-        if (requireFree && (!location.isNull("occupied_bundle_id") || location.optString("occupied_bundle_code").isNotBlank())) throw IllegalStateException("Locatie is al bezet.")
+        if (requireFree && !serverConfirmedFree && (!location.isNull("occupied_bundle_id") || location.optString("occupied_bundle_code").isNotBlank())) {
+            throw IllegalStateException("Locatie is al bezet in de lokale cache. Synchroniseer opnieuw of gebruik de testcorrectie met servercontrole.")
+        }
         if (!location.isNull("min_length_mm") && article.lengthMm < location.optInt("min_length_mm")) throw IllegalStateException("Veer is te kort voor deze locatie.")
         if (!location.isNull("max_length_mm") && article.lengthMm > location.optInt("max_length_mm")) throw IllegalStateException("Veer is te lang voor deze locatie.")
         val side = location.optString("allowed_side", "BOTH")
@@ -179,14 +191,25 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "tstock_veren_v10
         throw IllegalStateException("Veertype $type staat niet in de lokale gegevens.")
     }
 
-    fun receiveOffline(articleScan: String, suggestedCode: String, scannedCode: String, containerCode: String, bundleCodeInput: String, quantityOverride: Int?, correctionReason: String, userId: Long, deviceUuid: String): String {
+    fun receiveOffline(
+        articleScan: String,
+        suggestedCode: String,
+        scannedCode: String,
+        containerCode: String,
+        bundleCodeInput: String,
+        quantityOverride: Int?,
+        correctionReason: String,
+        userId: Long,
+        deviceUuid: String,
+        serverConfirmedFree: Boolean = false,
+    ): String {
         val article = parseArticle(articleScan)
         val suggested = suggestedCode.trim().uppercase()
         val scanned = scannedCode.trim().uppercase()
         if (scanned.isBlank()) throw IllegalArgumentException("Scan de locatie.")
         if (suggested.isNotBlank() && scanned != suggested) throw IllegalArgumentException("Verkeerde locatie. Verwacht $suggested, gescand $scanned.")
         val location = getLocation(scanned) ?: throw IllegalArgumentException("Locatie niet gevonden in de lokale gegevens.")
-        validateLocation(location, article, true)
+        validateLocation(location, article, true, serverConfirmedFree)
         val defaultQuantity = bundleSize(article.springType)
         val quantity = quantityOverride ?: defaultQuantity
         if (quantity <= 0) throw IllegalArgumentException("Aantal moet groter zijn dan 0.")
@@ -298,6 +321,22 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "tstock_veren_v10
         } finally { db.endTransaction() }
     }
     fun clearFailed() { writableDatabase.delete("mutations", "status IN ('FAILED','CONFLICT')", null) }
+
+    /** Verwijdert alleen de servercache; openstaande mutaties blijven veilig bewaard. */
+    fun clearCachedServerData() {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("spring_types", null, null)
+            db.delete("standard_lengths", null, null)
+            db.delete("locations", null, null)
+            db.delete("bundles", null, null)
+            db.delete("meta", "key IN ('last_sync','settings','cached_location_count','cached_bundle_count')", null)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
 
     fun locations(searchInput: String = ""): List<JSONObject> {
         val search = searchInput.trim().uppercase()

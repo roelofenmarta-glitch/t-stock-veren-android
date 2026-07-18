@@ -1,4 +1,4 @@
-name: Android APK V10.2.3
+name: Android APK V10.2.4 TEST
 
 on:
   workflow_dispatch:
@@ -51,20 +51,20 @@ jobs:
           rm -f android/app/src/main/res/drawable/ic_scan.xml
           rm -f android/app/src/main/res/drawable/ic_server.xml
 
-      - name: APK bouwen
+      - name: Losse TEST-app bouwen
         run: |
           if [ -n "${ANDROID_KEYSTORE_PATH:-}" ]; then
-            gradle -p android --no-daemon clean assembleRelease
-            cp android/app/build/outputs/apk/release/app-release.apk android/t-stock-veren-v10.2.3.apk
+            gradle -p android --no-daemon clean assembleBetaRelease
+            cp android/app/build/outputs/apk/beta/release/app-beta-release.apk android/t-stock-veren-v10.2.4-test.apk
           else
-            echo "Geen signing secrets gevonden: debug APK voor test wordt gebouwd."
-            gradle -p android --no-daemon clean assembleDebug
-            cp android/app/build/outputs/apk/debug/app-debug.apk android/t-stock-veren-v10.2.3-debug.apk
+            echo "Geen signing secrets gevonden: aparte beta-debug APK wordt gebouwd."
+            gradle -p android --no-daemon clean assembleBetaDebug
+            cp android/app/build/outputs/apk/beta/debug/app-beta-debug.apk android/t-stock-veren-v10.2.4-test-debug.apk
           fi
 
-      - name: APK publiceren als artifact
+      - name: TEST-APK publiceren als artifact
         uses: actions/upload-artifact@v4
         with:
-          name: T-Stock-Veren-V10.2.3-Android
-          path: android/t-stock-veren-v10.2.3*.apk
+          name: T-Stock-Veren-V10.2.4-TEST
+          path: android/t-stock-veren-v10.2.4-test*.apk
           retention-days: 30

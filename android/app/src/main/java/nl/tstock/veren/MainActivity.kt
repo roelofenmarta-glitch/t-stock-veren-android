@@ -126,8 +126,8 @@ private fun LoginScreen(vm: MainViewModel) {
         Card(Modifier.padding(20.dp).fillMaxWidth().widthIn(max = 500.dp), shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Box(Modifier.size(74.dp).background(Yellow, RoundedCornerShape(22.dp)), contentAlignment = Alignment.Center) { Text("T", color = Color.Black, fontSize = 40.sp, fontWeight = FontWeight.Black) }
-                Text("T-Stock Veren", style = MaterialTheme.typography.headlineMedium)
-                Text("Native Mobile · Offline · V10.2.3", color = Muted)
+                Text(BuildConfig.APP_TITLE, style = MaterialTheme.typography.headlineMedium)
+                Text("Native Mobile · Offline · ${BuildConfig.VERSION_NAME}", color = Muted)
                 OutlinedTextField(server, { server = it }, label = { Text("Serveradres") }, placeholder = { Text("http://192.168.2.126:8080") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 Button(onClick = { vm.setServerUrl(server) }, modifier = Modifier.fillMaxWidth()) { Text("Server opslaan") }
                 HorizontalDivider()
@@ -159,7 +159,14 @@ private fun NativeShell(vm: MainViewModel, launchScan: (ScanTarget) -> Unit) {
         topBar = {
             TopAppBar(
                 title = {
-                    Column { Text("T-Stock Veren", fontWeight = FontWeight.Black); Text(if (state.online) "Online" else "Offline · ${state.pendingCount} in wachtrij", fontSize = 12.sp, color = if (state.online) Green else Orange) }
+                    Column {
+                        Text(BuildConfig.APP_TITLE, fontWeight = FontWeight.Black)
+                        Text(
+                            (if (BuildConfig.IS_TEST_BUILD) "TEST · " else "") + if (state.online) "Online" else "Offline · ${state.pendingCount} in wachtrij",
+                            fontSize = 12.sp,
+                            color = if (state.online) Green else Orange,
+                        )
+                    }
                 },
                 navigationIcon = { if (state.screen != Screen.HOME) IconButton(onClick = { vm.setScreen(Screen.HOME) }) { Icon(Icons.Default.ArrowBack, "Terug") } },
                 actions = {
@@ -417,6 +424,15 @@ private fun SettingsScreen(vm: MainViewModel) {
             Text("${vm.state.cachedLocationCount} locaties, ${vm.state.cachedBundleCount} bundels en ${vm.state.pendingCount} openstaande mutaties", color = Muted)
             Text("Laatste synchronisatie: ${vm.state.lastSync}", color = Muted)
             if (vm.state.cachedLocationCount == 0) Text("Offline inboeken en verplaatsen werkt pas nadat locaties zijn gesynchroniseerd.", color = Orange)
+            OutlinedButton(
+                onClick = vm::rebuildOfflineCache,
+                enabled = vm.state.online && !vm.state.busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.Refresh, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Offline cache opnieuw opbouwen")
+            }
         } }
         OutlinedButton(onClick = vm::logout, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Logout, null); Spacer(Modifier.width(8.dp)); Text("Uitloggen") }
     }
