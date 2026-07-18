@@ -16,8 +16,8 @@ android {
         applicationId = "nl.tstock.veren"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10202
-        versionName = "10.2.2"
+        versionCode = 10203
+        versionName = "10.2.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }

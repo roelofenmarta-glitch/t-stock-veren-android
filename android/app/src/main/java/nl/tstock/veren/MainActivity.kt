@@ -51,6 +51,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent { TStockTheme { TStockApp(vm) } }
     }
+
+    override fun onResume() {
+        super.onResume()
+        vm.onAppForeground()
+    }
 }
 
 @Composable
@@ -122,7 +127,7 @@ private fun LoginScreen(vm: MainViewModel) {
             Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Box(Modifier.size(74.dp).background(Yellow, RoundedCornerShape(22.dp)), contentAlignment = Alignment.Center) { Text("T", color = Color.Black, fontSize = 40.sp, fontWeight = FontWeight.Black) }
                 Text("T-Stock Veren", style = MaterialTheme.typography.headlineMedium)
-                Text("Native Mobile · Offline · V10.2", color = Muted)
+                Text("Native Mobile · Offline · V10.2.3", color = Muted)
                 OutlinedTextField(server, { server = it }, label = { Text("Serveradres") }, placeholder = { Text("http://192.168.2.126:8080") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 Button(onClick = { vm.setServerUrl(server) }, modifier = Modifier.fillMaxWidth()) { Text("Server opslaan") }
                 HorizontalDivider()
@@ -189,6 +194,7 @@ private fun NativeShell(vm: MainViewModel, launchScan: (ScanTarget) -> Unit) {
                     Screen.MOVE -> MoveScreen(vm, launchScan)
                     Screen.ISSUE -> IssueScreen(vm, launchScan)
                     Screen.STOCK -> StockScreen(vm, launchScan)
+                    Screen.LOCATIONS -> LocationsScreen(vm)
                     Screen.SYNC -> SyncScreen(vm)
                     Screen.SETTINGS -> SettingsScreen(vm)
                 }
@@ -208,8 +214,22 @@ private fun HomeScreen(vm: MainViewModel) {
         HomeAction("Bundel verplaatsen", "Bundel en nieuwe locatie scannen", Icons.Default.SwapHoriz, Screen.MOVE, vm)
         HomeAction("Bundel uitboeken", "Voor productie of verbruik", Icons.Default.Output, Screen.ISSUE, vm)
         HomeAction("Voorraad zoeken", "Zoek lokaal op artikel, bundel of locatie", Icons.Default.Search, Screen.STOCK, vm)
+        HomeAction("Locaties", "${vm.state.cachedLocationCount} locaties offline opgeslagen", Icons.Default.LocationOn, Screen.LOCATIONS, vm)
         HomeAction("Synchronisatie", "${vm.state.pendingCount} mutaties wachten", Icons.Default.Sync, Screen.SYNC, vm)
-        ElevatedCard(Modifier.fillMaxWidth()) { Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) { Icon(if (vm.state.online) Icons.Default.CloudDone else Icons.Default.CloudOff, null, tint = if (vm.state.online) Green else Orange); Spacer(Modifier.width(12.dp)); Column { Text(if (vm.state.online) "Server bereikbaar" else "Offline werken actief", fontWeight = FontWeight.Bold); Text("Laatste sync: ${vm.state.lastSync}", color = Muted, fontSize = 12.sp) } } }
+        if (vm.state.cachedLocationCount == 0) {
+            StatusBox("Nog geen locaties offline opgeslagen. Verbind met de server en voer één volledige synchronisatie uit.", false)
+        }
+        ElevatedCard(Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(if (vm.state.online) Icons.Default.CloudDone else Icons.Default.CloudOff, null, tint = if (vm.state.online) Green else Orange)
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(if (vm.state.online) "Server bereikbaar" else "Offline werken actief", fontWeight = FontWeight.Bold)
+                    Text("${vm.state.cachedLocationCount} locaties · ${vm.state.cachedBundleCount} bundels offline", color = Muted, fontSize = 12.sp)
+                    Text("Laatste sync: ${vm.state.lastSync}", color = Muted, fontSize = 12.sp)
+                }
+            }
+        }
     }
 }
 
@@ -297,6 +317,67 @@ private fun StockScreen(vm: MainViewModel, launchScan: (ScanTarget) -> Unit) {
 }
 
 @Composable
+private fun LocationsScreen(vm: MainViewModel) {
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        ScreenTitle("Locaties", "Deze locaties zijn lokaal opgeslagen en blijven zonder netwerk beschikbaar.")
+        OutlinedTextField(
+            value = vm.locationSearch,
+            onValueChange = { vm.locationSearch = it; vm.refreshLocations() },
+            label = { Text("Zoek locatie") },
+            placeholder = { Text("Code, naam, bundel of artikel") },
+            leadingIcon = { Icon(Icons.Default.Search, null) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text("${vm.locationRows.size} van ${vm.state.cachedLocationCount} locaties", color = Muted)
+        if (vm.state.cachedLocationCount == 0) {
+            StatusBox("Geen offline locaties aanwezig. Open Synchronisatie terwijl de server bereikbaar is.", false, Modifier.padding(top = 12.dp))
+        } else {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 10.dp),
+            ) {
+                items(vm.locationRows, key = { it.optString("code") }) { location ->
+                    LocationCard(location)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocationCard(location: JSONObject) {
+    val occupied = !location.isNull("occupied_bundle_id") || location.optString("occupied_bundle_code").isNotBlank()
+    val blocked = location.optBoolean("blocked", false) || !location.optBoolean("enabled", true)
+    val statusText = when {
+        blocked -> "Geblokkeerd"
+        occupied -> "Bezet"
+        else -> "Vrij"
+    }
+    val statusColor = when {
+        blocked -> Red
+        occupied -> Orange
+        else -> Green
+    }
+    ElevatedCard(Modifier.fillMaxWidth(), colors = CardDefaults.elevatedCardColors(containerColor = CardDark)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(location.optString("display_name", location.optString("code")), fontWeight = FontWeight.Black, color = Yellow)
+                Text(statusText, color = statusColor, fontWeight = FontWeight.Bold)
+            }
+            Text("Code: ${location.optString("code")}", color = Muted)
+            location.optString("occupied_bundle_code").takeIf { it.isNotBlank() }?.let { Text("Bundel: $it") }
+            location.optString("occupied_article_number").takeIf { it.isNotBlank() }?.let { Text("Artikel: $it", color = Muted) }
+            val min = if (location.isNull("min_length_mm")) "-" else location.optInt("min_length_mm").toString()
+            val max = if (location.isNull("max_length_mm")) "-" else location.optInt("max_length_mm").toString()
+            Text("Lengte $min–$max mm · Kant ${location.optString("allowed_side", "BOTH")}", color = Muted, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
 private fun SyncScreen(vm: MainViewModel) {
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).padding(16.dp)) {
@@ -307,6 +388,7 @@ private fun SyncScreen(vm: MainViewModel) {
             }
             Spacer(Modifier.height(12.dp))
             Text("${vm.state.pendingCount} openstaande mutaties", fontWeight = FontWeight.Bold)
+            Text("Offline cache: ${vm.state.cachedLocationCount} locaties en ${vm.state.cachedBundleCount} bundels", color = Muted, fontSize = 12.sp)
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 10.dp)) {
                 items(vm.mutationRows, key = { it.optString("uuid") }) { row ->
                     ElevatedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp)) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(row.optString("type"), fontWeight = FontWeight.Bold); Text(row.optString("status"), color = when(row.optString("status")) { "CONFLICT","FAILED" -> Red; else -> Orange }) }; Text(row.optJSONObject("payload")?.optString("articleNumber", row.optJSONObject("payload")?.optString("bundleCode", "")) ?: "", color = Muted); row.optString("error").takeIf { it.isNotBlank() }?.let { Text(it, color = Red, fontSize = 12.sp) } } }
@@ -331,7 +413,10 @@ private fun SettingsScreen(vm: MainViewModel) {
             Button(onClick = { vm.checkForUpdates() }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.SystemUpdate, null); Spacer(Modifier.width(8.dp)); Text("Controleer op updates") }
         } }
         ElevatedCard { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Lokale opslag", fontWeight = FontWeight.Bold); Text("${vm.store.stock().size} bundels en ${vm.state.pendingCount} openstaande mutaties", color = Muted); Text("Laatste synchronisatie: ${vm.state.lastSync}", color = Muted)
+            Text("Lokale opslag", fontWeight = FontWeight.Bold)
+            Text("${vm.state.cachedLocationCount} locaties, ${vm.state.cachedBundleCount} bundels en ${vm.state.pendingCount} openstaande mutaties", color = Muted)
+            Text("Laatste synchronisatie: ${vm.state.lastSync}", color = Muted)
+            if (vm.state.cachedLocationCount == 0) Text("Offline inboeken en verplaatsen werkt pas nadat locaties zijn gesynchroniseerd.", color = Orange)
         } }
         OutlinedButton(onClick = vm::logout, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Logout, null); Spacer(Modifier.width(8.dp)); Text("Uitloggen") }
     }

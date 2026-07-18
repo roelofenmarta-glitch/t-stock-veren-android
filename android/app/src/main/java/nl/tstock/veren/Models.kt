@@ -1,6 +1,6 @@
 package nl.tstock.veren
 
-enum class Screen { HOME, RECEIVE, MOVE, ISSUE, STOCK, SYNC, SETTINGS }
+enum class Screen { HOME, RECEIVE, MOVE, ISSUE, STOCK, LOCATIONS, SYNC, SETTINGS }
 enum class ScanTarget { ARTICLE, RECEIVE_LOCATION, FIND_BUNDLE, MOVE_LOCATION, STOCK_SEARCH }
 
 data class UserSession(
@@ -29,6 +29,8 @@ data class AppState(
     val message: String = "",
     val error: String = "",
     val pendingCount: Int = 0,
+    val cachedLocationCount: Int = 0,
+    val cachedBundleCount: Int = 0,
     val lastSync: String = "Nog niet gesynchroniseerd",
     val updateInfo: UpdateInfo? = null,
     val scanTarget: ScanTarget? = null,

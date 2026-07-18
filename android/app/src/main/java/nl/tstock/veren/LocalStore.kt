@@ -27,26 +27,68 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "tstock_veren_v10
         readableDatabase.rawQuery("SELECT value FROM meta WHERE key=?", arrayOf(key)).use { return if (it.moveToFirst()) it.getString(0) else fallback }
     }
 
+    private fun countInDb(db: SQLiteDatabase, table: String): Int {
+        db.rawQuery("SELECT COUNT(*) FROM $table", null).use { return if (it.moveToFirst()) it.getInt(0) else 0 }
+    }
+
+    fun locationCount(): Int = countInDb(readableDatabase, "locations")
+    fun bundleCount(): Int = countInDb(readableDatabase, "bundles")
+    fun hasOfflineLocations(): Boolean = locationCount() > 0
+
+    /**
+     * Slaat de complete offline dataset atomair op.
+     *
+     * Belangrijk: een lege of ongeldige serverrespons mag de bestaande locatiecache
+     * nooit wissen. Daardoor blijven eerder gesynchroniseerde locaties bruikbaar
+     * wanneer de server tijdelijk niet goed reageert of nog niet naar V10.2 is bijgewerkt.
+     */
     fun saveBootstrap(data: JSONObject) {
+        if (!data.has("locations")) {
+            throw IllegalStateException("De server leverde geen locaties. Werk de T-Stock-server bij en synchroniseer opnieuw.")
+        }
+        val locations = data.optJSONArray("locations")
+            ?: throw IllegalStateException("De locatiegegevens van de server zijn ongeldig.")
+        if (locations.length() == 0) {
+            throw IllegalStateException("De server leverde 0 locaties. De bestaande offline locatiecache is behouden.")
+        }
+
+        val springTypes = data.optJSONArray("springTypes")
+            ?: throw IllegalStateException("De server leverde geen veertypen voor offline gebruik.")
+        val standardLengths = data.optJSONArray("standardLengths") ?: JSONArray()
+        val bundles = data.optJSONArray("bundles") ?: JSONArray()
+
         val db = writableDatabase
         db.beginTransaction()
         try {
-            db.delete("spring_types", null, null); db.delete("standard_lengths", null, null); db.delete("locations", null, null); db.delete("bundles", null, null)
-            putArray(db, "spring_types", "code", "spring_type_code", data.optJSONArray("springTypes") ?: JSONArray())
-            val lengths = data.optJSONArray("standardLengths") ?: JSONArray()
-            for (i in 0 until lengths.length()) {
-                val row = lengths.getJSONObject(i)
+            db.delete("spring_types", null, null)
+            db.delete("standard_lengths", null, null)
+            db.delete("locations", null, null)
+            db.delete("bundles", null, null)
+
+            putArray(db, "spring_types", "code", "spring_type_code", springTypes)
+            for (i in 0 until standardLengths.length()) {
+                val row = standardLengths.getJSONObject(i)
                 db.insert("standard_lengths", null, ContentValues().apply {
                     put("type_code", if (row.isNull("spring_type_code")) null as String? else row.optString("spring_type_code"))
                     put("length_mm", row.optInt("length_mm"))
                 })
             }
-            putArray(db, "locations", "code", "code", data.optJSONArray("locations") ?: JSONArray())
-            putArray(db, "bundles", "bundle_code", "bundle_code", data.optJSONArray("bundles") ?: JSONArray())
+            putArray(db, "locations", "code", "code", locations)
+            putArray(db, "bundles", "bundle_code", "bundle_code", bundles)
+
+            val insertedLocations = countInDb(db, "locations")
+            if (insertedLocations == 0) {
+                throw IllegalStateException("Er konden geen locaties lokaal worden opgeslagen.")
+            }
+
             setMetaInDb(db, "last_sync", data.optString("generatedAt", Instant.now().toString()))
             setMetaInDb(db, "settings", (data.optJSONObject("settings") ?: JSONObject()).toString())
+            setMetaInDb(db, "cached_location_count", insertedLocations.toString())
+            setMetaInDb(db, "cached_bundle_count", countInDb(db, "bundles").toString())
             db.setTransactionSuccessful()
-        } finally { db.endTransaction() }
+        } finally {
+            db.endTransaction()
+        }
     }
 
     private fun putArray(db: SQLiteDatabase, table: String, keyColumn: String, jsonKey: String, rows: JSONArray) {
@@ -70,6 +112,9 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "tstock_veren_v10
     }
 
     fun suggestLocation(articleScan: String): JSONObject {
+        if (!hasOfflineLocations()) {
+            throw IllegalStateException("Er zijn nog geen locaties offline opgeslagen. Maak verbinding met de server en kies Nu synchroniseren.")
+        }
         val article = parseArticle(articleScan)
         validateStandardLength(article)
         val candidates = mutableListOf<JSONObject>()
@@ -253,6 +298,31 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "tstock_veren_v10
         } finally { db.endTransaction() }
     }
     fun clearFailed() { writableDatabase.delete("mutations", "status IN ('FAILED','CONFLICT')", null) }
+
+    fun locations(searchInput: String = ""): List<JSONObject> {
+        val search = searchInput.trim().uppercase()
+        val rows = mutableListOf<JSONObject>()
+        readableDatabase.rawQuery("SELECT json FROM locations", null).use { cursor ->
+            while (cursor.moveToNext()) {
+                val row = JSONObject(cursor.getString(0))
+                val matches = search.isBlank() ||
+                    row.optString("code").uppercase().contains(search) ||
+                    row.optString("display_name").uppercase().contains(search) ||
+                    row.optString("old_location_code").uppercase().contains(search) ||
+                    row.optString("occupied_bundle_code").uppercase().contains(search) ||
+                    row.optString("occupied_article_number").uppercase().contains(search)
+                if (matches) rows += row
+            }
+        }
+        return rows.sortedWith(compareBy<JSONObject>(
+            { it.optString("zone") },
+            { it.optInt("rack") },
+            { it.optInt("column_nr") },
+            { it.optInt("row_nr") },
+            { it.optInt("position_nr") },
+            { it.optString("code") },
+        ))
+    }
 
     fun stock(searchInput: String = ""): List<JSONObject> {
         val search = searchInput.trim().uppercase(); val rows = mutableListOf<JSONObject>()
