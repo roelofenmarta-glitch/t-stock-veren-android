@@ -16,8 +16,8 @@ android {
         applicationId = "nl.tstock.veren"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10300
-        versionName = "10.3.0"
+        versionCode = 10500
+        versionName = "10.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         manifestPlaceholders["appLabel"] = "T-Stock Veren"
@@ -29,14 +29,25 @@ android {
             dimension = "channel"
             buildConfigField("boolean", "IS_TEST_BUILD", "false")
             buildConfigField("String", "APP_TITLE", "\"T-Stock Veren\"")
+            buildConfigField("String", "UPDATE_CHANNEL", "\"stable\"")
             manifestPlaceholders["appLabel"] = "T-Stock Veren"
         }
         create("beta") {
             dimension = "channel"
-            applicationIdSuffix = ".test"
+            applicationIdSuffix = ".beta"
+            versionNameSuffix = "-beta"
+            buildConfigField("boolean", "IS_TEST_BUILD", "true")
+            buildConfigField("String", "APP_TITLE", "\"T-Stock Veren BETA\"")
+            buildConfigField("String", "UPDATE_CHANNEL", "\"beta\"")
+            manifestPlaceholders["appLabel"] = "T-Stock Veren BETA"
+        }
+        create("test") {
+            dimension = "channel"
+            applicationIdSuffix = ".test105"
             versionNameSuffix = "-test"
             buildConfigField("boolean", "IS_TEST_BUILD", "true")
             buildConfigField("String", "APP_TITLE", "\"T-Stock Veren TEST\"")
+            buildConfigField("String", "UPDATE_CHANNEL", "\"test\"")
             manifestPlaceholders["appLabel"] = "T-Stock Veren TEST"
         }
     }

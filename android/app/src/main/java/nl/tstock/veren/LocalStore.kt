@@ -11,7 +11,7 @@ import java.util.UUID
 
 class LocalStore(context: Context) : SQLiteOpenHelper(
     context,
-    if (BuildConfig.IS_TEST_BUILD) "tstock_veren_v102_test.db" else "tstock_veren_v102.db",
+    if (BuildConfig.IS_TEST_BUILD) "tstock_veren_v104_test.db" else "tstock_veren_v104.db",
     null,
     1,
 ) {
@@ -381,12 +381,17 @@ class LocalStore(context: Context) : SQLiteOpenHelper(
 
     fun pendingJson(): JSONArray {
         val result = JSONArray()
-        readableDatabase.rawQuery("SELECT uuid,type,payload,created_at FROM mutations WHERE status<>'PROCESSED' ORDER BY created_at", null).use { c ->
+        readableDatabase.rawQuery("SELECT uuid,type,payload,created_at FROM mutations WHERE status IN ('PENDING','FAILED','CONFLICT') ORDER BY created_at", null).use { c ->
             while (c.moveToNext()) result.put(JSONObject().put("uuid", c.getString(0)).put("type", c.getString(1)).put("payload", JSONObject(c.getString(2))).put("createdAt", c.getString(3)))
         }
         return result
     }
-    fun pendingCount(): Int { readableDatabase.rawQuery("SELECT COUNT(*) FROM mutations WHERE status<>'PROCESSED'", null).use { return if (it.moveToFirst()) it.getInt(0) else 0 } }
+    fun pendingCount(): Int { readableDatabase.rawQuery("SELECT COUNT(*) FROM mutations WHERE status IN ('PENDING','FAILED','CONFLICT')", null).use { return if (it.moveToFirst()) it.getInt(0) else 0 } }
+    fun mutationCount(status: String): Int {
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM mutations WHERE status=?", arrayOf(status)).use {
+            return if (it.moveToFirst()) it.getInt(0) else 0
+        }
+    }
     fun mutationRows(): List<JSONObject> {
         val rows = mutableListOf<JSONObject>()
         readableDatabase.rawQuery("SELECT uuid,type,payload,status,created_at,error FROM mutations ORDER BY created_at DESC LIMIT 100", null).use { c ->
@@ -405,7 +410,7 @@ class LocalStore(context: Context) : SQLiteOpenHelper(
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
     }
-    fun clearFailed() { writableDatabase.delete("mutations", "status IN ('FAILED','CONFLICT')", null) }
+    fun clearCancelled() { writableDatabase.delete("mutations", "status='CANCELLED'", null) }
 
     /** Verwijdert alleen de servercache; openstaande mutaties blijven veilig bewaard. */
     fun clearCachedServerData() {

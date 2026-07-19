@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -23,15 +24,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val network = NetworkClient { state.serverUrl }
     private var lastForegroundRefreshAt = 0L
     private var receiveSuggestionConfirmedByServer = false
+    private var serverUnlockUntilMillis = 0L
 
     var state by mutableStateOf(
         AppState(
             serverUrl = prefs.getString("server_url", "") ?: "",
             user = loadUser(),
             pendingCount = store.pendingCount(),
+            conflictCount = store.mutationCount("CONFLICT"),
+            failedCount = store.mutationCount("FAILED"),
             cachedLocationCount = store.locationCount(),
             cachedBundleCount = store.bundleCount(),
             lastSync = store.getMeta("last_sync", "Nog niet gesynchroniseerd"),
+            workAreaKey = prefs.getString("work_area_key", "hoofdlocatie") ?: "hoofdlocatie",
+            workAreaName = prefs.getString("work_area_name", "Hoofdlocatie") ?: "Hoofdlocatie",
             offlineProfileKey = prefs.getString("offline_profile_key", "paganelstraat") ?: "paganelstraat",
             offlineProfileName = prefs.getString("offline_profile_name", "Paganelstraat") ?: "Paganelstraat",
         )
@@ -96,6 +102,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun refreshOfflineStats() {
         state = state.copy(
             pendingCount = store.pendingCount(),
+            conflictCount = store.mutationCount("CONFLICT"),
+            failedCount = store.mutationCount("FAILED"),
             cachedLocationCount = store.locationCount(),
             cachedBundleCount = store.bundleCount(),
             lastSync = store.getMeta("last_sync", state.lastSync),
@@ -118,11 +126,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             state = state.copy(error = "Vul een geldig serveradres in.", message = "")
             return
         }
-        if (state.serverUrl.isNotBlank() && !state.serverSettingsUnlocked) {
-            state = state.copy(error = "Ontgrendel de serverinstellingen eerst met een beheerlogin.", message = "")
+        val unlockStillValid = state.serverSettingsUnlocked && System.currentTimeMillis() < serverUnlockUntilMillis
+        if (state.serverUrl.isNotBlank() && !unlockStillValid) {
+            serverUnlockUntilMillis = 0L
+            state = state.copy(serverSettingsUnlocked = false, error = "Ontgrendel de serverinstellingen eerst met een beheerlogin.", message = "")
             return
         }
         prefs.edit().putString("server_url", clean).apply()
+        serverUnlockUntilMillis = 0L
         state = state.copy(serverUrl = clean, serverSettingsUnlocked = false, message = "Serveradres opgeslagen.", error = "")
         startupRefresh(force = true)
     }
@@ -133,10 +144,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "/api/mobile/admin/unlock",
             JSONObject().put("username", username.trim()).put("secret", secret).put("mode", if (pinMode) "pin" else "password"),
         )
+        val expiresAt = System.currentTimeMillis() + 5 * 60 * 1000L
+        serverUnlockUntilMillis = expiresAt
         state = state.copy(serverSettingsUnlocked = true, message = "Serverinstellingen zijn 5 minuten ontgrendeld.", error = "")
+        viewModelScope.launch {
+            delay(5 * 60 * 1000L)
+            if (serverUnlockUntilMillis == expiresAt) lockServerSettings()
+        }
     }
 
     fun lockServerSettings() {
+        serverUnlockUntilMillis = 0L
         state = state.copy(serverSettingsUnlocked = false, message = "Serverinstellingen vergrendeld.")
     }
 
@@ -187,21 +205,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 network.get("/api/health")
                 state = state.copy(online = true)
+                loadWorkAreas()
                 loadOfflineProfiles()
                 if (state.user != null) {
                     syncAllInternal(showMessage = false)
                 }
                 loadUpdateInfo(showCurrentMessage = false)
             } catch (e: Exception) {
-                state = state.copy(online = false)
+                state = state.copy(online = false, syncState = "Offline")
                 refreshOfflineStats()
                 if (state.user != null && store.locationCount() == 0) {
                     state = state.copy(
-                        error = "Geen offline locaties opgeslagen. Verbind met de V10.2-server en druk bij Synchronisatie op Nu synchroniseren. ${e.message.orEmpty()}",
+                        error = "Geen offline locaties opgeslagen. Verbind met de V10.5-server en druk bij Synchronisatie op Nu synchroniseren. ${e.message.orEmpty()}",
                     )
                 }
             }
         }
+    }
+
+
+    private suspend fun loadWorkAreas() {
+        try {
+            val data = network.get("/api/mobile/work-areas")
+            val rows = data.optJSONArray("workAreas") ?: data.optJSONArray("work_areas") ?: JSONArray()
+            val areas = (0 until rows.length()).mapNotNull { index ->
+                rows.optJSONObject(index)?.let { row ->
+                    WorkArea(
+                        key = row.optString("key", row.optString("work_area_key")),
+                        name = row.optString("name", row.optString("key")),
+                        description = row.optString("description"),
+                        isDefault = row.optBoolean("is_default", false),
+                    )
+                }
+            }.filter { it.key.isNotBlank() }
+            if (areas.isNotEmpty()) {
+                val selected = areas.find { it.key == state.workAreaKey } ?: areas.find { it.isDefault } ?: areas.first()
+                prefs.edit().putString("work_area_key", selected.key).putString("work_area_name", selected.name).apply()
+                state = state.copy(availableWorkAreas = areas, workAreaKey = selected.key, workAreaName = selected.name)
+            }
+        } catch (_: Exception) { }
+    }
+
+    fun setWorkArea(area: WorkArea) {
+        if (state.pendingCount > 0) {
+            state = state.copy(error = "Synchroniseer eerst de openstaande mutaties voordat je van werkgebied wisselt.", message = "")
+            return
+        }
+        prefs.edit().putString("work_area_key", area.key).putString("work_area_name", area.name).apply()
+        state = state.copy(workAreaKey = area.key, workAreaName = area.name, message = "Werkgebied ingesteld op ${area.name}.", error = "")
+        resetReceive()
+        selectedBundle = null
+        if (state.online && state.user != null) rebuildOfflineCache()
     }
 
     private suspend fun loadOfflineProfiles() {
@@ -239,7 +293,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     .put("deviceName", "${Build.MANUFACTURER} ${Build.MODEL}")
                     .put("appVersionCode", BuildConfig.VERSION_CODE)
                     .put("appVersionName", BuildConfig.VERSION_NAME)
-                    .put("userId", user.id),
+                    .put("userId", user.id)
+                    .put("profileKey", state.offlineProfileKey)
+                    .put("workAreaKey", state.workAreaKey),
             )
         } catch (_: Exception) {
             // Registratie mag offline gebruik niet blokkeren.
@@ -285,7 +341,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 network.post(
                     "/api/mobile/suggest-location",
-                    JSONObject().put("articleNumber", receiveArticle).put("profileKey", state.offlineProfileKey),
+                    JSONObject().put("articleNumber", receiveArticle).put("profileKey", state.offlineProfileKey).put("workAreaKey", state.workAreaKey),
                 ).getJSONObject("suggestedLocation").also {
                     receiveSuggestionConfirmedByServer = true
                 }
@@ -395,10 +451,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshOfflineStats()
     }
 
-    fun clearFailedMutations() {
-        store.clearFailed()
+    fun clearCancelledMutations() {
+        store.clearCancelled()
         refreshQueue()
-        state = state.copy(message = "Mislukte mutaties verwijderd.")
+        state = state.copy(message = "Geannuleerde mutaties uit de lokale lijst verwijderd.")
     }
 
     fun syncAll() = runTask {
@@ -407,14 +463,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun rebuildOfflineCache() = runTask {
         if (!state.online) throw IllegalStateException("Maak eerst verbinding met de server.")
-        store.clearCachedServerData()
-        refreshOfflineStats()
+        // De bestaande cache blijft staan totdat een volledige nieuwe dataset succesvol
+        // is ontvangen en atomair is opgeslagen. Een netwerkfout kan offline werken dus
+        // niet meer onbedoeld leegmaken.
         syncAllInternal(showMessage = true)
-        state = state.copy(message = "Offline cache opnieuw opgebouwd: ${store.locationCount()} locaties geladen.")
+        state = state.copy(message = "Offline cache veilig vernieuwd: ${store.locationCount()} locaties geladen.")
     }
 
     private suspend fun syncAllInternal(showMessage: Boolean) {
         val user = state.user ?: throw IllegalStateException("Log opnieuw in.")
+        state = state.copy(syncState = "Synchroniseren…")
         val pending = store.pendingJson()
         if (pending.length() > 0) {
             val response = network.post(
@@ -422,16 +480,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 JSONObject()
                     .put("deviceUuid", deviceUuid)
                     .put("userId", user.id)
+                    .put("profileKey", state.offlineProfileKey)
+                    .put("workAreaKey", state.workAreaKey)
+                    .put("pendingCount", pending.length())
                     .put("mutations", pending),
             )
             store.applySyncResults(response.optJSONArray("results") ?: JSONArray())
         }
 
         val bootstrap = try {
-            network.get("/api/mobile/bootstrap?profileKey=${state.offlineProfileKey}")
+            network.get("/api/mobile/bootstrap?profileKey=${state.offlineProfileKey}&workAreaKey=${state.workAreaKey}")
         } catch (e: NetworkException) {
             if (e.status == 404) {
-                throw IllegalStateException("De server heeft nog geen mobiele offline API. Installeer eerst T-Stock Veren Server V10.2 of nieuwer.")
+                throw IllegalStateException("De server heeft nog geen mobiele offline API. Installeer eerst T-Stock Veren Server V10.5 TEST of nieuwer.")
             }
             throw e
         }
@@ -450,9 +511,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshOfflineStats()
         state = state.copy(
             online = true,
+            syncState = "Gesynchroniseerd",
             lastSync = bootstrap.optString("generatedAt", Instant.now().toString()),
             message = if (showMessage) {
-                "Synchronisatie voltooid: ${store.locationCount()} locaties offline beschikbaar."
+                "Synchronisatie voltooid: ${store.locationCount()} locaties van ${state.workAreaName} offline beschikbaar."
             } else {
                 state.message
             },
@@ -465,7 +527,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun loadUpdateInfo(showCurrentMessage: Boolean) {
-        val channel = if (BuildConfig.IS_TEST_BUILD) "beta" else "stable"
+        val channel = BuildConfig.UPDATE_CHANNEL
         val data = network.get("/api/mobile/version?channel=$channel")
         val changes = data.optJSONArray("changelog") ?: JSONArray()
         val info = UpdateInfo(
@@ -498,7 +560,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 block()
             } catch (e: Exception) {
-                if (e is NetworkException) state = state.copy(online = false)
+                if (e is NetworkException) state = state.copy(online = false, syncState = "Synchronisatiefout")
                 refreshOfflineStats()
                 if (!silent) state = state.copy(error = e.message ?: "Onbekende fout.", message = "")
             } finally {

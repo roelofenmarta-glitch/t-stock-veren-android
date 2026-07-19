@@ -10,6 +10,13 @@ data class UserSession(
     val roleName: String,
 )
 
+data class WorkArea(
+    val key: String,
+    val name: String,
+    val description: String = "",
+    val isDefault: Boolean = false,
+)
+
 data class OfflineProfile(
     val key: String,
     val name: String,
@@ -36,11 +43,17 @@ data class AppState(
     val message: String = "",
     val error: String = "",
     val pendingCount: Int = 0,
+    val conflictCount: Int = 0,
+    val failedCount: Int = 0,
+    val syncState: String = "Gereed",
     val cachedLocationCount: Int = 0,
     val cachedBundleCount: Int = 0,
     val lastSync: String = "Nog niet gesynchroniseerd",
     val updateInfo: UpdateInfo? = null,
     val scanTarget: ScanTarget? = null,
+    val workAreaKey: String = "hoofdlocatie",
+    val workAreaName: String = "Hoofdlocatie",
+    val availableWorkAreas: List<WorkArea> = listOf(WorkArea("hoofdlocatie", "Hoofdlocatie", isDefault = true), WorkArea("paganelstraat", "Paganelstraat")),
     val offlineProfileKey: String = "paganelstraat",
     val offlineProfileName: String = "Paganelstraat",
     val availableProfiles: List<OfflineProfile> = listOf(OfflineProfile("paganelstraat", "Paganelstraat", isDefault = true)),

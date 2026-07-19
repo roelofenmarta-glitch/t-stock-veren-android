@@ -3,6 +3,11 @@ package nl.tstock.veren
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.graphics.Color as AndroidColor
+import android.view.Gravity
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -33,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.ViewModelProvider
 import com.google.zxing.client.android.Intents
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -47,16 +53,67 @@ private val Green = Color(0xFF45D477)
 private val Red = Color(0xFFFF6B6B)
 
 class MainActivity : ComponentActivity() {
-    private val vm: MainViewModel by viewModels()
+    private var vm: MainViewModel? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { TStockTheme { TStockApp(vm) } }
+
+        val startup = runCatching {
+            ViewModelProvider(this)[MainViewModel::class.java]
+        }
+        vm = startup.getOrNull()
+
+        val readyVm = vm
+        if (readyVm == null) {
+            showStartupRecovery(startup.exceptionOrNull())
+            return
+        }
+
+        runCatching {
+            setContent { TStockTheme { TStockApp(readyVm) } }
+        }.onFailure { showStartupRecovery(it) }
     }
 
     override fun onResume() {
         super.onResume()
-        vm.onAppForeground()
+        vm?.onAppForeground()
+    }
+
+    /**
+     * Native herstelscherm dat ook werkt wanneer Compose of de lokale database
+     * nog niet gestart kan worden. Zo sluit de app niet zonder uitleg af.
+     */
+    private fun showStartupRecovery(error: Throwable?) {
+        val padding = (24 * resources.displayMetrics.density).toInt()
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(padding, padding, padding, padding)
+            setBackgroundColor(AndroidColor.rgb(11, 17, 28))
+        }
+        layout.addView(TextView(this).apply {
+            text = "T-Stock Veren TEST"
+            textSize = 26f
+            setTextColor(AndroidColor.WHITE)
+            gravity = Gravity.CENTER
+        })
+        layout.addView(TextView(this).apply {
+            text = "De lokale testgegevens konden niet worden geopend. Wis alleen de lokale testcache en start opnieuw. Gegevens op de Docker-server worden niet verwijderd.\n\nTechnische melding: ${error?.javaClass?.simpleName ?: "onbekend"}: ${error?.message ?: "geen details"}"
+            textSize = 15f
+            setTextColor(AndroidColor.LTGRAY)
+            gravity = Gravity.CENTER
+            setPadding(0, padding, 0, padding)
+        })
+        layout.addView(Button(this).apply {
+            text = "Lokale testcache herstellen"
+            setOnClickListener {
+                getSharedPreferences("tstock_settings", MODE_PRIVATE).edit().clear().commit()
+                databaseList().filter { it.startsWith("tstock_veren") }.forEach(::deleteDatabase)
+                recreate()
+            }
+        })
+        setContentView(layout)
     }
 }
 
@@ -173,7 +230,7 @@ private fun NativeShell(vm: MainViewModel, launchScan: (ScanTarget) -> Unit) {
                     Column {
                         Text(BuildConfig.APP_TITLE, fontWeight = FontWeight.Black)
                         Text(
-                            "${state.offlineProfileName} · " + if (state.online) "Online" else "Offline · ${state.pendingCount} in wachtrij",
+                            "${state.workAreaName} · " + if (state.online) "Online" else "Offline · ${state.pendingCount} in wachtrij",
                             fontSize = 12.sp,
                             color = if (state.online) Green else Orange,
                         )
@@ -223,17 +280,32 @@ private fun NativeShell(vm: MainViewModel, launchScan: (ScanTarget) -> Unit) {
 }
 
 @Composable
+private fun WorkAreaSelector(vm: MainViewModel) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        vm.state.availableWorkAreas.forEach { area ->
+            FilterChip(
+                selected = vm.state.workAreaKey == area.key,
+                onClick = { vm.setWorkArea(area) },
+                label = { Column { Text(area.name); if (area.description.isNotBlank()) Text(area.description, fontSize = 11.sp, color = Muted) } },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
 private fun HomeScreen(vm: MainViewModel) {
     val user = vm.state.user
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Goedendag, ${user?.displayName}", style = MaterialTheme.typography.headlineMedium)
-        Text("Kies een magazijnactie. De app blijft bruikbaar zonder netwerk.", color = Muted)
+        Text("Kies je werkgebied en daarna een magazijnactie. De app blijft bruikbaar zonder netwerk.", color = Muted)
+        WorkAreaSelector(vm)
         HomeAction("Bundel inboeken", "Artikel → locatieadvies → locatiecontrole", Icons.Default.Inventory, Screen.RECEIVE, vm)
         HomeAction("Bundel verplaatsen", "Bundel en nieuwe locatie scannen", Icons.Default.SwapHoriz, Screen.MOVE, vm)
         HomeAction("Bundel uitboeken", "Voor productie of verbruik", Icons.Default.Output, Screen.ISSUE, vm)
         HomeAction("Voorraad zoeken", "Zoek lokaal op artikel, bundel of locatie", Icons.Default.Search, Screen.STOCK, vm)
         HomeAction("Locaties", "${vm.state.cachedLocationCount} locaties offline opgeslagen", Icons.Default.LocationOn, Screen.LOCATIONS, vm)
-        HomeAction("Synchronisatie", "${vm.state.pendingCount} mutaties wachten", Icons.Default.Sync, Screen.SYNC, vm)
+        HomeAction("Synchronisatie", "${vm.state.pendingCount} wachtend · ${vm.state.conflictCount + vm.state.failedCount} aandacht", Icons.Default.Sync, Screen.SYNC, vm)
         if (vm.state.cachedLocationCount == 0) {
             StatusBox("Nog geen locaties offline opgeslagen. Verbind met de server en voer één volledige synchronisatie uit.", false)
         }
@@ -405,15 +477,18 @@ private fun SyncScreen(vm: MainViewModel) {
                 OutlinedButton(onClick = vm::refreshQueue) { Icon(Icons.Default.Refresh, null) }
             }
             Spacer(Modifier.height(12.dp))
-            Text("${vm.state.pendingCount} openstaande mutaties", fontWeight = FontWeight.Bold)
-            Text("Offline cache: ${vm.state.cachedLocationCount} locaties en ${vm.state.cachedBundleCount} bundels", color = Muted, fontSize = 12.sp)
+            Text("Status: ${vm.state.syncState}", color = if (vm.state.online) Green else Orange, fontWeight = FontWeight.Bold)
+            Text("${vm.state.pendingCount} openstaande mutaties · ${vm.state.conflictCount} conflicten · ${vm.state.failedCount} mislukt", fontWeight = FontWeight.Bold)
+            Text("${vm.state.workAreaName}: ${vm.state.cachedLocationCount} locaties en ${vm.state.cachedBundleCount} bundels offline", color = Muted, fontSize = 12.sp)
+            Text("Laatste synchronisatie: ${vm.state.lastSync}", color = Muted, fontSize = 12.sp)
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 10.dp)) {
                 items(vm.mutationRows, key = { it.optString("uuid") }) { row ->
                     ElevatedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp)) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(row.optString("type"), fontWeight = FontWeight.Bold); Text(row.optString("status"), color = when(row.optString("status")) { "CONFLICT","FAILED" -> Red; else -> Orange }) }; Text(row.optJSONObject("payload")?.optString("articleNumber", row.optJSONObject("payload")?.optString("bundleCode", "")) ?: "", color = Muted); row.optString("error").takeIf { it.isNotBlank() }?.let { Text(it, color = Red, fontSize = 12.sp) } } }
                 }
             }
         }
-        if (vm.mutationRows.any { it.optString("status") in listOf("FAILED","CONFLICT") }) TextButton(onClick = vm::clearFailedMutations, modifier = Modifier.fillMaxWidth().padding(8.dp)) { Text("Mislukte mutaties verwijderen", color = Red) }
+        if (vm.mutationRows.any { it.optString("status") == "CANCELLED" }) TextButton(onClick = vm::clearCancelledMutations, modifier = Modifier.fillMaxWidth().padding(8.dp)) { Text("Geannuleerde regels opruimen", color = Muted) }
+        if (vm.state.conflictCount + vm.state.failedCount > 0) Text("Conflicten blijven bewaard. Laat een Admin ze beoordelen in de webapp onder Offline mutaties.", color = Orange, modifier = Modifier.padding(16.dp))
     }
 }
 
@@ -422,8 +497,15 @@ private fun SettingsScreen(vm: MainViewModel) {
     var server by remember(vm.state.serverUrl) { mutableStateOf(vm.state.serverUrl) }
     var adminUser by remember { mutableStateOf("") }
     var adminSecret by remember { mutableStateOf("") }
+    var adminPinMode by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        ScreenTitle("Instellingen", "Offline opslag, synchronisatie en beveiligd beheer.")
+        ScreenTitle("Instellingen", "Werkgebied, offline opslag, synchronisatie en beveiligd beheer.")
+
+        ElevatedCard { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Werkgebied", fontWeight = FontWeight.Bold)
+            WorkAreaSelector(vm)
+            Text("Alle locaties, voorraad en locatieadviezen worden strikt op dit werkgebied gefilterd.", color = Muted, fontSize = 12.sp)
+        } }
 
         ElevatedCard { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Offline opslag", fontWeight = FontWeight.Bold)
@@ -440,7 +522,7 @@ private fun SettingsScreen(vm: MainViewModel) {
             Text("Laatste synchronisatie: ${vm.state.lastSync}", color = Muted, fontSize = 12.sp)
             if (vm.state.cachedLocationCount == 0) Text("Synchroniseer dit profiel minimaal één keer online voordat je offline gaat werken.", color = Orange)
             OutlinedButton(onClick = vm::rebuildOfflineCache, enabled = vm.state.online && !vm.state.busy, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("Offline cache opnieuw opbouwen")
+                Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("Offline cache veilig vernieuwen")
             }
         } }
 
@@ -449,8 +531,13 @@ private fun SettingsScreen(vm: MainViewModel) {
             if (!vm.state.serverSettingsUnlocked) {
                 Text("Het serveradres is beveiligd. Alleen een gebruiker met serverbeheerrechten kan dit wijzigen.", color = Muted)
                 OutlinedTextField(adminUser, { adminUser = it }, label = { Text("Beheerder") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                OutlinedTextField(adminSecret, { adminSecret = it }, label = { Text("Toegangscode") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
-                Button(onClick = { vm.unlockServerSettings(adminUser, adminSecret, adminSecret.all { it.isDigit() }) }, modifier = Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = adminPinMode, onCheckedChange = { adminPinMode = it })
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (adminPinMode) "Inloggen met pincode" else "Inloggen met wachtwoord", color = Muted)
+                }
+                OutlinedTextField(adminSecret, { adminSecret = it }, label = { Text(if (adminPinMode) "Pincode" else "Wachtwoord") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
+                Button(onClick = { vm.unlockServerSettings(adminUser, adminSecret, adminPinMode) }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.LockOpen, null); Spacer(Modifier.width(8.dp)); Text("Ontgrendelen")
                 }
             } else {
@@ -466,7 +553,7 @@ private fun SettingsScreen(vm: MainViewModel) {
 
         ElevatedCard { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Updates", fontWeight = FontWeight.Bold)
-            Text(if (BuildConfig.IS_TEST_BUILD) "Testkanaal (beta)" else "Stabiel kanaal", color = Muted)
+            Text("Updatekanaal: ${BuildConfig.UPDATE_CHANNEL}", color = Muted)
             Button(onClick = { vm.checkForUpdates() }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.SystemUpdate, null); Spacer(Modifier.width(8.dp)); Text("Controleer op updates") }
         } }
         OutlinedButton(onClick = vm::logout, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Logout, null); Spacer(Modifier.width(8.dp)); Text("Uitloggen") }
