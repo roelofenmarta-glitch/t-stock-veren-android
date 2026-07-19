@@ -10,6 +10,13 @@ data class UserSession(
     val roleName: String,
 )
 
+data class OfflineProfile(
+    val key: String,
+    val name: String,
+    val description: String = "",
+    val isDefault: Boolean = false,
+)
+
 data class UpdateInfo(
     val versionCode: Int,
     val versionName: String,
@@ -34,4 +41,8 @@ data class AppState(
     val lastSync: String = "Nog niet gesynchroniseerd",
     val updateInfo: UpdateInfo? = null,
     val scanTarget: ScanTarget? = null,
+    val offlineProfileKey: String = "paganelstraat",
+    val offlineProfileName: String = "Paganelstraat",
+    val availableProfiles: List<OfflineProfile> = listOf(OfflineProfile("paganelstraat", "Paganelstraat", isDefault = true)),
+    val serverSettingsUnlocked: Boolean = false,
 )

@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.zxing.client.android.Intents
 import com.journeyapps.barcodescanner.ScanContract
@@ -118,29 +120,38 @@ private fun TStockApp(vm: MainViewModel) {
 
 @Composable
 private fun LoginScreen(vm: MainViewModel) {
-    var username by remember { mutableStateOf("operator") }
+    var username by remember { mutableStateOf("") }
     var secret by remember { mutableStateOf("") }
-    var pinMode by remember { mutableStateOf(true) }
     var server by remember(vm.state.serverUrl) { mutableStateOf(vm.state.serverUrl) }
     Box(Modifier.fillMaxSize().background(Dark).statusBarsPadding().navigationBarsPadding().imePadding(), contentAlignment = Alignment.Center) {
         Card(Modifier.padding(20.dp).fillMaxWidth().widthIn(max = 500.dp), shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Box(Modifier.size(74.dp).background(Yellow, RoundedCornerShape(22.dp)), contentAlignment = Alignment.Center) { Text("T", color = Color.Black, fontSize = 40.sp, fontWeight = FontWeight.Black) }
+                Image(
+                    painter = painterResource(R.mipmap.ic_launcher),
+                    contentDescription = "T-Stock Veren",
+                    modifier = Modifier.size(82.dp),
+                )
                 Text(BuildConfig.APP_TITLE, style = MaterialTheme.typography.headlineMedium)
-                Text("Native Mobile · Offline · ${BuildConfig.VERSION_NAME}", color = Muted)
-                OutlinedTextField(server, { server = it }, label = { Text("Serveradres") }, placeholder = { Text("http://192.168.2.126:8080") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                Button(onClick = { vm.setServerUrl(server) }, modifier = Modifier.fillMaxWidth()) { Text("Server opslaan") }
-                HorizontalDivider()
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    FilterChip(selected = pinMode, onClick = { pinMode = true }, label = { Text("Operator-pincode") })
-                    Spacer(Modifier.width(8.dp))
-                    FilterChip(selected = !pinMode, onClick = { pinMode = false }, label = { Text("Wachtwoord") })
+                Text("Voorraadbeheer", color = Muted)
+                if (vm.state.serverUrl.isBlank()) {
+                    ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = Dark.copy(alpha=.55f))) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Eerste installatie", fontWeight = FontWeight.Bold)
+                            Text("Stel eenmalig het serveradres in. Daarna is wijzigen alleen mogelijk via een beheerlogin.", color = Muted, fontSize = 12.sp)
+                            OutlinedTextField(server, { server = it }, label = { Text("Serveradres") }, placeholder = { Text("http://192.168.2.126:8080") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                            Button(onClick = { vm.setServerUrl(server) }, modifier = Modifier.fillMaxWidth()) { Text("Server instellen") }
+                        }
+                    }
                 }
-                OutlinedTextField(username, { username = it }, label = { Text("Gebruiker") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                OutlinedTextField(secret, { secret = it }, label = { Text(if (pinMode) "Pincode" else "Wachtwoord") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(username, { username = it }, label = { Text("Gebruikersnaam") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(secret, { secret = it }, label = { Text("Toegangscode") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
                 vm.state.error.takeIf { it.isNotBlank() }?.let { StatusBox(it, false) }
                 vm.state.message.takeIf { it.isNotBlank() }?.let { StatusBox(it, true) }
-                Button(onClick = { vm.login(username, secret, pinMode) }, enabled = !vm.state.busy && server.isNotBlank(), modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                Button(
+                    onClick = { vm.login(username, secret, secret.all { it.isDigit() }) },
+                    enabled = !vm.state.busy && vm.state.serverUrl.isNotBlank() && username.isNotBlank() && secret.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                ) {
                     if (vm.state.busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) else Text("Inloggen", fontWeight = FontWeight.Bold)
                 }
             }
@@ -162,7 +173,7 @@ private fun NativeShell(vm: MainViewModel, launchScan: (ScanTarget) -> Unit) {
                     Column {
                         Text(BuildConfig.APP_TITLE, fontWeight = FontWeight.Black)
                         Text(
-                            (if (BuildConfig.IS_TEST_BUILD) "TEST · " else "") + if (state.online) "Online" else "Offline · ${state.pendingCount} in wachtrij",
+                            "${state.offlineProfileName} · " + if (state.online) "Online" else "Offline · ${state.pendingCount} in wachtrij",
                             fontSize = 12.sp,
                             color = if (state.online) Green else Orange,
                         )
@@ -272,7 +283,7 @@ private fun ReceiveScreen(vm: MainViewModel, launchScan: (ScanTarget) -> Unit) {
             StepCard(3, "Scan locatie ter controle") {
                 ScanField("Locatiecode", vm.receiveLocationScan, { vm.receiveLocationScan = it.uppercase() }, { launchScan(ScanTarget.RECEIVE_LOCATION) }, "Scan stellinglabel")
                 if (vm.receiveLocationScan.isNotBlank() && vm.receiveSuggestedCode.isNotBlank()) {
-                    val correct = vm.receiveLocationScan.trim().uppercase() == vm.receiveSuggestedCode.trim().uppercase()
+                    val correct = vm.receiveLocationIsCorrect()
                     StatusBox(if (correct) "Locatie is correct." else "Verkeerde locatie. Verwacht ${vm.receiveSuggestedCode}.", correct)
                 }
             }
@@ -409,30 +420,54 @@ private fun SyncScreen(vm: MainViewModel) {
 @Composable
 private fun SettingsScreen(vm: MainViewModel) {
     var server by remember(vm.state.serverUrl) { mutableStateOf(vm.state.serverUrl) }
+    var adminUser by remember { mutableStateOf("") }
+    var adminSecret by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        ScreenTitle("Instellingen", "Server, updates en lokale opslag.")
+        ScreenTitle("Instellingen", "Offline opslag, synchronisatie en beveiligd beheer.")
+
         ElevatedCard { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(server, { server = it }, label = { Text("Serveradres") }, modifier = Modifier.fillMaxWidth())
-            Button(onClick = { vm.setServerUrl(server) }, modifier = Modifier.fillMaxWidth()) { Text("Server opslaan en testen") }
-        } }
-        ElevatedCard { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("App-versie", fontWeight = FontWeight.Bold); Text("${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", color = Muted)
-            Button(onClick = { vm.checkForUpdates() }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.SystemUpdate, null); Spacer(Modifier.width(8.dp)); Text("Controleer op updates") }
-        } }
-        ElevatedCard { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Lokale opslag", fontWeight = FontWeight.Bold)
-            Text("${vm.state.cachedLocationCount} locaties, ${vm.state.cachedBundleCount} bundels en ${vm.state.pendingCount} openstaande mutaties", color = Muted)
-            Text("Laatste synchronisatie: ${vm.state.lastSync}", color = Muted)
-            if (vm.state.cachedLocationCount == 0) Text("Offline inboeken en verplaatsen werkt pas nadat locaties zijn gesynchroniseerd.", color = Orange)
-            OutlinedButton(
-                onClick = vm::rebuildOfflineCache,
-                enabled = vm.state.online && !vm.state.busy,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Default.Refresh, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Offline cache opnieuw opbouwen")
+            Text("Offline opslag", fontWeight = FontWeight.Bold)
+            Text("Actief profiel: ${vm.state.offlineProfileName}", color = Yellow, fontWeight = FontWeight.Bold)
+            vm.state.availableProfiles.forEach { profile ->
+                FilterChip(
+                    selected = vm.state.offlineProfileKey == profile.key,
+                    onClick = { vm.setOfflineProfile(profile) },
+                    label = { Column { Text(profile.name); if (profile.description.isNotBlank()) Text(profile.description, fontSize = 11.sp, color = Muted) } },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
+            Text("${vm.state.cachedLocationCount} locaties, ${vm.state.cachedBundleCount} bundels en ${vm.state.pendingCount} openstaande mutaties", color = Muted)
+            Text("Laatste synchronisatie: ${vm.state.lastSync}", color = Muted, fontSize = 12.sp)
+            if (vm.state.cachedLocationCount == 0) Text("Synchroniseer dit profiel minimaal één keer online voordat je offline gaat werken.", color = Orange)
+            OutlinedButton(onClick = vm::rebuildOfflineCache, enabled = vm.state.online && !vm.state.busy, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("Offline cache opnieuw opbouwen")
+            }
+        } }
+
+        ElevatedCard { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Serverinstellingen", fontWeight = FontWeight.Bold)
+            if (!vm.state.serverSettingsUnlocked) {
+                Text("Het serveradres is beveiligd. Alleen een gebruiker met serverbeheerrechten kan dit wijzigen.", color = Muted)
+                OutlinedTextField(adminUser, { adminUser = it }, label = { Text("Beheerder") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(adminSecret, { adminSecret = it }, label = { Text("Toegangscode") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
+                Button(onClick = { vm.unlockServerSettings(adminUser, adminSecret, adminSecret.all { it.isDigit() }) }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.LockOpen, null); Spacer(Modifier.width(8.dp)); Text("Ontgrendelen")
+                }
+            } else {
+                StatusBox("Serverinstellingen tijdelijk ontgrendeld.", true)
+                OutlinedTextField(server, { server = it }, label = { Text("Serveradres") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                Button(onClick = { vm.setServerUrl(server) }, modifier = Modifier.fillMaxWidth()) { Text("Server opslaan en testen") }
+                TextButton(onClick = vm::lockServerSettings, modifier = Modifier.fillMaxWidth()) { Text("Nu vergrendelen") }
+                HorizontalDivider()
+                Text("Systeeminformatie", fontWeight = FontWeight.Bold)
+                Text("App ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", color = Muted)
+            }
+        } }
+
+        ElevatedCard { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Updates", fontWeight = FontWeight.Bold)
+            Text(if (BuildConfig.IS_TEST_BUILD) "Testkanaal (beta)" else "Stabiel kanaal", color = Muted)
+            Button(onClick = { vm.checkForUpdates() }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.SystemUpdate, null); Spacer(Modifier.width(8.dp)); Text("Controleer op updates") }
         } }
         OutlinedButton(onClick = vm::logout, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Logout, null); Spacer(Modifier.width(8.dp)); Text("Uitloggen") }
     }

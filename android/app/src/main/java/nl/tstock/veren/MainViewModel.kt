@@ -32,6 +32,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             cachedLocationCount = store.locationCount(),
             cachedBundleCount = store.bundleCount(),
             lastSync = store.getMeta("last_sync", "Nog niet gesynchroniseerd"),
+            offlineProfileKey = prefs.getString("offline_profile_key", "paganelstraat") ?: "paganelstraat",
+            offlineProfileName = prefs.getString("offline_profile_name", "Paganelstraat") ?: "Paganelstraat",
         )
     ); private set
 
@@ -112,9 +114,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setServerUrl(value: String) {
         val clean = value.trim().trimEnd('/')
+        if (clean.isBlank()) {
+            state = state.copy(error = "Vul een geldig serveradres in.", message = "")
+            return
+        }
+        if (state.serverUrl.isNotBlank() && !state.serverSettingsUnlocked) {
+            state = state.copy(error = "Ontgrendel de serverinstellingen eerst met een beheerlogin.", message = "")
+            return
+        }
         prefs.edit().putString("server_url", clean).apply()
-        state = state.copy(serverUrl = clean, message = "Serveradres opgeslagen.", error = "")
+        state = state.copy(serverUrl = clean, serverSettingsUnlocked = false, message = "Serveradres opgeslagen.", error = "")
         startupRefresh(force = true)
+    }
+
+    fun unlockServerSettings(username: String, secret: String, pinMode: Boolean) = runTask {
+        if (username.isBlank() || secret.isBlank()) throw IllegalArgumentException("Vul de beheerlogin en toegangscode in.")
+        network.post(
+            "/api/mobile/admin/unlock",
+            JSONObject().put("username", username.trim()).put("secret", secret).put("mode", if (pinMode) "pin" else "password"),
+        )
+        state = state.copy(serverSettingsUnlocked = true, message = "Serverinstellingen zijn 5 minuten ontgrendeld.", error = "")
+    }
+
+    fun lockServerSettings() {
+        state = state.copy(serverSettingsUnlocked = false, message = "Serverinstellingen vergrendeld.")
+    }
+
+    fun setOfflineProfile(profile: OfflineProfile) {
+        prefs.edit().putString("offline_profile_key", profile.key).putString("offline_profile_name", profile.name).apply()
+        state = state.copy(offlineProfileKey = profile.key, offlineProfileName = profile.name, message = "Offline opslag ingesteld op ${profile.name}.")
+        if (state.online && state.user != null) rebuildOfflineCache()
     }
 
     fun logout() {
@@ -158,6 +187,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 network.get("/api/health")
                 state = state.copy(online = true)
+                loadOfflineProfiles()
                 if (state.user != null) {
                     syncAllInternal(showMessage = false)
                 }
@@ -171,6 +201,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }
+        }
+    }
+
+    private suspend fun loadOfflineProfiles() {
+        try {
+            val data = network.get("/api/mobile/profiles")
+            val rows = data.optJSONArray("profiles") ?: JSONArray()
+            val profiles = (0 until rows.length()).mapNotNull { index ->
+                rows.optJSONObject(index)?.let { row ->
+                    OfflineProfile(
+                        key = row.optString("profile_key"),
+                        name = row.optString("name", row.optString("profile_key")),
+                        description = row.optString("description"),
+                        isDefault = row.optBoolean("is_default", false),
+                    )
+                }
+            }.filter { it.key.isNotBlank() }
+            if (profiles.isNotEmpty()) {
+                val selected = profiles.find { it.key == state.offlineProfileKey }
+                    ?: profiles.find { it.isDefault } ?: profiles.first()
+                prefs.edit().putString("offline_profile_key", selected.key).putString("offline_profile_name", selected.name).apply()
+                state = state.copy(availableProfiles = profiles, offlineProfileKey = selected.key, offlineProfileName = selected.name)
+            }
+        } catch (_: Exception) {
+            // Een oudere server of tijdelijk netwerkprobleem mag offline gebruik niet blokkeren.
         }
     }
 
@@ -230,7 +285,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 network.post(
                     "/api/mobile/suggest-location",
-                    JSONObject().put("articleNumber", receiveArticle),
+                    JSONObject().put("articleNumber", receiveArticle).put("profileKey", state.offlineProfileKey),
                 ).getJSONObject("suggestedLocation").also {
                     receiveSuggestionConfirmedByServer = true
                 }
@@ -245,6 +300,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         receiveSuggestedName = location.optString("display_name", receiveSuggestedCode)
         state = state.copy(message = "Vrije locatie: $receiveSuggestedName")
     }
+
+    fun receiveLocationIsCorrect(): Boolean =
+        store.locationCodesMatch(receiveSuggestedCode, receiveLocationScan)
 
     fun receiveBundle() = runTask {
         val user = state.user ?: throw IllegalStateException("Log opnieuw in.")
@@ -370,7 +428,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val bootstrap = try {
-            network.get("/api/mobile/bootstrap")
+            network.get("/api/mobile/bootstrap?profileKey=${state.offlineProfileKey}")
         } catch (e: NetworkException) {
             if (e.status == 404) {
                 throw IllegalStateException("De server heeft nog geen mobiele offline API. Installeer eerst T-Stock Veren Server V10.2 of nieuwer.")
@@ -378,6 +436,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             throw e
         }
         store.saveBootstrap(bootstrap)
+        bootstrap.optJSONObject("profile")?.let { profile ->
+            val key = profile.optString("key", state.offlineProfileKey)
+            val name = profile.optString("name", state.offlineProfileName)
+            prefs.edit().putString("offline_profile_key", key).putString("offline_profile_name", name).apply()
+            state = state.copy(offlineProfileKey = key, offlineProfileName = name)
+        }
         registerDevice()
 
         stockRows = store.stock(stockSearch)
@@ -401,14 +465,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun loadUpdateInfo(showCurrentMessage: Boolean) {
-        if (BuildConfig.IS_TEST_BUILD) {
-            state = state.copy(
-                updateInfo = null,
-                message = if (showCurrentMessage) "Dit is de losse testapp. Productie-updates staan hier bewust uit." else state.message,
-            )
-            return
-        }
-        val data = network.get("/api/mobile/version")
+        val channel = if (BuildConfig.IS_TEST_BUILD) "beta" else "stable"
+        val data = network.get("/api/mobile/version?channel=$channel")
         val changes = data.optJSONArray("changelog") ?: JSONArray()
         val info = UpdateInfo(
             data.optInt("versionCode"),

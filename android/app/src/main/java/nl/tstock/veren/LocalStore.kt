@@ -81,6 +81,11 @@ class LocalStore(context: Context) : SQLiteOpenHelper(
             putArray(db, "locations", "code", "code", locations)
             putArray(db, "bundles", "bundle_code", "bundle_code", bundles)
 
+            // De bezetting wordt opnieuw opgebouwd vanuit de daadwerkelijk lokaal
+            // opgeslagen actieve bundels. Hiermee worden oude/stale bezet-vlaggen
+            // uit een eerdere bootstrap niet meegenomen naar offline gebruik.
+            rebuildLocationOccupancy(db)
+
             val insertedLocations = countInDb(db, "locations")
             if (insertedLocations == 0) {
                 throw IllegalStateException("Er konden geen locaties lokaal worden opgeslagen.")
@@ -108,6 +113,70 @@ class LocalStore(context: Context) : SQLiteOpenHelper(
         db.insertWithOnConflict("meta", null, ContentValues().apply { put("key", key); put("value", value) }, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
+    private fun normalizedLocationToken(value: String): String = value.trim().uppercase()
+
+    /**
+     * Maakt de locatiebezetting consistent met de lokale bundeltabel. De bundeltabel
+     * is de bron van waarheid voor offline gebruik; losse occupied_* velden uit een
+     * oude cache mogen een werkelijk vrije plek niet blokkeren.
+     */
+    private fun rebuildLocationOccupancy(db: SQLiteDatabase) {
+        val bundles = mutableListOf<JSONObject>()
+        db.rawQuery("SELECT json FROM bundles", null).use { cursor ->
+            while (cursor.moveToNext()) bundles += JSONObject(cursor.getString(0))
+        }
+
+        val locations = mutableListOf<JSONObject>()
+        db.rawQuery("SELECT json FROM locations", null).use { cursor ->
+            while (cursor.moveToNext()) locations += JSONObject(cursor.getString(0))
+        }
+
+        for (location in locations) {
+            val id = location.optLong("id", Long.MIN_VALUE)
+            val code = normalizedLocationToken(location.optString("code"))
+            val occupiedBy = bundles.firstOrNull { bundle ->
+                val bundleLocationId = bundle.optLong("location_id", Long.MIN_VALUE)
+                val bundleLocationCode = normalizedLocationToken(bundle.optString("location_code"))
+                (id != Long.MIN_VALUE && bundleLocationId == id) || (code.isNotBlank() && bundleLocationCode == code)
+            }
+
+            if (occupiedBy == null) {
+                location.put("occupied_bundle_id", JSONObject.NULL)
+                    .put("occupied_bundle_code", "")
+                    .put("occupied_article_number", "")
+            } else {
+                location.put("occupied_bundle_id", occupiedBy.optLong("id"))
+                    .put("occupied_bundle_code", occupiedBy.optString("bundle_code"))
+                    .put("occupied_article_number", occupiedBy.optString("article_number"))
+            }
+            saveLocation(db, location)
+        }
+    }
+
+    private fun localBundleAtLocation(location: JSONObject): JSONObject? {
+        val id = location.optLong("id", Long.MIN_VALUE)
+        val code = normalizedLocationToken(location.optString("code"))
+        readableDatabase.rawQuery("SELECT json FROM bundles", null).use { cursor ->
+            while (cursor.moveToNext()) {
+                val bundle = JSONObject(cursor.getString(0))
+                val bundleLocationId = bundle.optLong("location_id", Long.MIN_VALUE)
+                val bundleLocationCode = normalizedLocationToken(bundle.optString("location_code"))
+                if ((id != Long.MIN_VALUE && bundleLocationId == id) || (code.isNotBlank() && bundleLocationCode == code)) {
+                    return bundle
+                }
+            }
+        }
+        return null
+    }
+
+    fun locationCodesMatch(expected: String, scanned: String): Boolean {
+        if (expected.isBlank() || scanned.isBlank()) return false
+        val expectedLocation = getLocation(expected) ?: return normalizedLocationToken(expected) == normalizedLocationToken(scanned)
+        val scannedLocation = getLocation(scanned) ?: return false
+        return normalizedLocationToken(expectedLocation.optString("code")) ==
+            normalizedLocationToken(scannedLocation.optString("code"))
+    }
+
     data class Article(val articleNumber: String, val springType: String, val side: String, val lengthMm: Int, val raw: String)
     fun parseArticle(scan: String): Article {
         val normalized = scan.trim().uppercase().replace(Regex("\\s+"), " ")
@@ -127,7 +196,9 @@ class LocalStore(context: Context) : SQLiteOpenHelper(
             while (cursor.moveToNext()) {
                 val row = JSONObject(cursor.getString(0))
                 if (!row.optBoolean("enabled", true) || row.optBoolean("blocked", false)) continue
-                if (!row.isNull("occupied_bundle_id") || row.optString("occupied_bundle_code").isNotBlank()) continue
+                // Controleer de actuele lokale bundeltabel in plaats van alleen de
+                // mogelijk verouderde occupied_* velden in het locatie-JSON.
+                if (localBundleAtLocation(row) != null) continue
                 if (!row.isNull("min_length_mm") && article.lengthMm < row.optInt("min_length_mm")) continue
                 if (!row.isNull("max_length_mm") && article.lengthMm > row.optInt("max_length_mm")) continue
                 val side = row.optString("allowed_side", "BOTH")
@@ -173,8 +244,14 @@ class LocalStore(context: Context) : SQLiteOpenHelper(
     ) {
         if (!location.optBoolean("enabled", true)) throw IllegalStateException("Locatie is uitgeschakeld.")
         if (location.optBoolean("blocked", false)) throw IllegalStateException("Locatie is geblokkeerd.")
-        if (requireFree && !serverConfirmedFree && (!location.isNull("occupied_bundle_id") || location.optString("occupied_bundle_code").isNotBlank())) {
-            throw IllegalStateException("Locatie is al bezet in de lokale cache. Synchroniseer opnieuw of gebruik de testcorrectie met servercontrole.")
+        if (requireFree && !serverConfirmedFree) {
+            val occupied = localBundleAtLocation(location)
+            if (occupied != null) {
+                throw IllegalStateException(
+                    "Locatie ${location.optString("display_name", location.optString("code"))} is offline bezet door " +
+                        occupied.optString("bundle_code", occupied.optString("article_number", "een bundel")) + ".",
+                )
+            }
         }
         if (!location.isNull("min_length_mm") && article.lengthMm < location.optInt("min_length_mm")) throw IllegalStateException("Veer is te kort voor deze locatie.")
         if (!location.isNull("max_length_mm") && article.lengthMm > location.optInt("max_length_mm")) throw IllegalStateException("Veer is te lang voor deze locatie.")
@@ -204,11 +281,19 @@ class LocalStore(context: Context) : SQLiteOpenHelper(
         serverConfirmedFree: Boolean = false,
     ): String {
         val article = parseArticle(articleScan)
-        val suggested = suggestedCode.trim().uppercase()
-        val scanned = scannedCode.trim().uppercase()
-        if (scanned.isBlank()) throw IllegalArgumentException("Scan de locatie.")
-        if (suggested.isNotBlank() && scanned != suggested) throw IllegalArgumentException("Verkeerde locatie. Verwacht $suggested, gescand $scanned.")
-        val location = getLocation(scanned) ?: throw IllegalArgumentException("Locatie niet gevonden in de lokale gegevens.")
+        val suggestedInput = normalizedLocationToken(suggestedCode)
+        val scannedInput = normalizedLocationToken(scannedCode)
+        if (scannedInput.isBlank()) throw IllegalArgumentException("Scan de locatie.")
+
+        val location = getLocation(scannedInput)
+            ?: throw IllegalArgumentException("Locatie $scannedInput staat niet in de offline locatiecache. Synchroniseer één keer online.")
+        val scanned = normalizedLocationToken(location.optString("code"))
+        val suggestedLocation = if (suggestedInput.isBlank()) null else getLocation(suggestedInput)
+        val suggested = suggestedLocation?.optString("code")?.let(::normalizedLocationToken) ?: suggestedInput
+
+        if (suggested.isNotBlank() && scanned != suggested) {
+            throw IllegalArgumentException("Verkeerde locatie. Verwacht $suggested, gescand $scanned.")
+        }
         validateLocation(location, article, true, serverConfirmedFree)
         val defaultQuantity = bundleSize(article.springType)
         val quantity = quantityOverride ?: defaultQuantity

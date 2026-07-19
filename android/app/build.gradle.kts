@@ -16,8 +16,8 @@ android {
         applicationId = "nl.tstock.veren"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10204
-        versionName = "10.2.4"
+        versionCode = 10300
+        versionName = "10.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         manifestPlaceholders["appLabel"] = "T-Stock Veren"
