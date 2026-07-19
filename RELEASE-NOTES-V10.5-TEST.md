@@ -1,4 +1,4 @@
-# T-Stock Veren V10.5 TEST
+# T-Stock Veren V10.5.1 TEST
 
 ## Nieuw
 - Verplichte keuze van werkgebied in web en Android.

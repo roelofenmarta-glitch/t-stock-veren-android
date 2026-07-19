@@ -1,9 +1,9 @@
-# Android V10.5 TEST
+# Android V10.5.1 TEST
 
 - Productie-app: `nl.tstock.veren`, updatekanaal `stable`.
 - Beta-app: `nl.tstock.veren.beta`, updatekanaal `beta`.
 - Losse testapp: `nl.tstock.veren.test104`, updatekanaal `test`.
-- Testversie: `10.5.0-test`, versionCode `10500`.
+- Testversie: `10.5.1-test`, versionCode `10500`.
 - Appicoon: gecombineerd C+T-logo.
 - Android Auto Backup is uitgeschakeld voor betrouwbare lokale testdata.
 - Serverinstellingen zijn na de eerste configuratie alleen met beheerlogin te wijzigen.

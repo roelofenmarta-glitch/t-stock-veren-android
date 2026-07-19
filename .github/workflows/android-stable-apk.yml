@@ -1,4 +1,4 @@
-name: Android APK V10.5 STABLE
+name: Android APK V10.5.1 STABLE
 
 on:
   workflow_dispatch:
@@ -35,9 +35,9 @@ jobs:
       - name: Stable productie-app bouwen
         run: |
           gradle -p android --no-daemon clean assembleProductionRelease
-          cp android/app/build/outputs/apk/production/release/app-production-release.apk android/t-stock-veren-v10.5-stable.apk
+          cp android/app/build/outputs/apk/production/release/app-production-release.apk android/t-stock-veren-v10.5.1-stable.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: T-Stock-Veren-V10.5-STABLE
-          path: android/t-stock-veren-v10.5-stable.apk
+          name: T-Stock-Veren-V10.5.1-STABLE
+          path: android/t-stock-veren-v10.5.1-stable.apk
           retention-days: 90

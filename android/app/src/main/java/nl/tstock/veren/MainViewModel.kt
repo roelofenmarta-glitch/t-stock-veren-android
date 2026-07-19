@@ -492,7 +492,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             network.get("/api/mobile/bootstrap?profileKey=${state.offlineProfileKey}&workAreaKey=${state.workAreaKey}")
         } catch (e: NetworkException) {
             if (e.status == 404) {
-                throw IllegalStateException("De server heeft nog geen mobiele offline API. Installeer eerst T-Stock Veren Server V10.5 TEST of nieuwer.")
+                throw IllegalStateException("De server heeft nog geen mobiele offline API. Installeer eerst T-Stock Veren Server V10.5.1 TEST of nieuwer.")
             }
             throw e
         }
