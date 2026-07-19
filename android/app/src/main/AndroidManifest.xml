@@ -3,7 +3,9 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <application
+        android:name=".TStockApplication"
         android:allowBackup="false"
+        android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="${appLabel}"
@@ -12,6 +14,10 @@
         android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
+            android:screenOrientation="unspecified"
+            android:exported="false" />
+        <activity
+            android:name=".LauncherActivity"
             android:screenOrientation="unspecified"
             android:exported="true">
             <intent-filter>

@@ -14,7 +14,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -36,7 +35,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.ViewModelProvider
 import com.google.zxing.client.android.Intents
@@ -71,6 +69,7 @@ class MainActivity : ComponentActivity() {
         }
 
         runCatching {
+            CrashStore.clear(this)
             setContent { TStockTheme { TStockApp(readyVm) } }
         }.onFailure { showStartupRecovery(it) }
     }
@@ -119,6 +118,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun TStockTheme(content: @Composable () -> Unit) {
+    val baseTypography = Typography()
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = Yellow, onPrimary = Color.Black, secondary = Orange,
@@ -126,9 +126,9 @@ private fun TStockTheme(content: @Composable () -> Unit) {
             error = Red,
         ),
         typography = Typography(
-            headlineMedium = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black),
-            titleLarge = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-            titleMedium = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            headlineMedium = baseTypography.headlineMedium.copy(fontWeight = FontWeight.Black),
+            titleLarge = baseTypography.titleLarge.copy(fontWeight = FontWeight.Bold),
+            titleMedium = baseTypography.titleMedium.copy(fontWeight = FontWeight.Bold),
         ), content = content
     )
 }
@@ -136,17 +136,6 @@ private fun TStockTheme(content: @Composable () -> Unit) {
 @Composable
 private fun TStockApp(vm: MainViewModel) {
     val state = vm.state
-    val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        result.contents?.let(vm::onScanResult)
-    }
-    fun launchScan(target: ScanTarget) {
-        vm.requestScan(target)
-        scanner.launch(
-            ScanOptions().setPrompt("Scan artikel, bundel of locatie")
-                .setBeepEnabled(true).setOrientationLocked(false).setDesiredBarcodeFormats(ScanOptions.ALL_CODE_TYPES)
-        )
-    }
-
     val context = LocalContext.current
     state.updateInfo?.let { update ->
         AlertDialog(
@@ -168,11 +157,24 @@ private fun TStockApp(vm: MainViewModel) {
         )
     }
 
-    if (state.user == null) {
-        LoginScreen(vm)
-    } else {
-        NativeShell(vm, ::launchScan)
+    if (state.user == null) LoginScreen(vm) else LoggedInApp(vm)
+}
+
+@Composable
+private fun LoggedInApp(vm: MainViewModel) {
+    val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
+        result.contents?.let(vm::onScanResult)
     }
+    fun launchScan(target: ScanTarget) {
+        vm.requestScan(target)
+        scanner.launch(
+            ScanOptions().setPrompt("Scan artikel, bundel of locatie")
+                .setBeepEnabled(true)
+                .setOrientationLocked(false)
+                .setDesiredBarcodeFormats(ScanOptions.ALL_CODE_TYPES)
+        )
+    }
+    NativeShell(vm, ::launchScan)
 }
 
 @Composable
@@ -183,11 +185,15 @@ private fun LoginScreen(vm: MainViewModel) {
     Box(Modifier.fillMaxSize().background(Dark).statusBarsPadding().navigationBarsPadding().imePadding(), contentAlignment = Alignment.Center) {
         Card(Modifier.padding(20.dp).fillMaxWidth().widthIn(max = 500.dp), shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Image(
-                    painter = painterResource(R.mipmap.ic_launcher),
-                    contentDescription = "T-Stock Veren",
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = Color.Black,
                     modifier = Modifier.size(82.dp),
-                )
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("C+T", color = Yellow, fontWeight = FontWeight.Black, fontSize = 24.sp)
+                    }
+                }
                 Text(BuildConfig.APP_TITLE, style = MaterialTheme.typography.headlineMedium)
                 Text("Voorraadbeheer", color = Muted)
                 if (vm.state.serverUrl.isBlank()) {
