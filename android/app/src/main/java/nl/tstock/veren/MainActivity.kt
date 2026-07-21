@@ -191,7 +191,7 @@ private fun LoginScreen(vm: MainViewModel) {
                     modifier = Modifier.size(82.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text("C+T", color = Yellow, fontWeight = FontWeight.Black, fontSize = 24.sp)
+                        Text("C", color = Color.White, fontWeight = FontWeight.Black, fontSize = 34.sp)
                     }
                 }
                 Text(BuildConfig.APP_TITLE, style = MaterialTheme.typography.headlineMedium)

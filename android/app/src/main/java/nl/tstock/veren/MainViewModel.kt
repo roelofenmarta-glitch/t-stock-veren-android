@@ -345,12 +345,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ).getJSONObject("suggestedLocation").also {
                     receiveSuggestionConfirmedByServer = true
                 }
-            } catch (e: NetworkException) {
-                state = state.copy(online = false)
-                store.suggestLocation(receiveArticle)
+            } catch (e: Exception) {
+                // Een internetverbinding betekent niet automatisch dat de T-Stock-server
+                // bereikbaar is. Bij iedere verbindingsfout direct terugvallen op de
+                // lokale cache van het actieve werkgebied.
+                state = state.copy(online = false, syncState = "Offline")
+                try {
+                    store.suggestLocation(receiveArticle)
+                } catch (offlineError: Exception) {
+                    throw IllegalStateException(
+                        "Server niet bereikbaar en geen passende vrije locatie in de offline cache van ${state.workAreaName}. " +
+                            "Synchroniseer dit werkgebied één keer online. ${offlineError.message.orEmpty()}",
+                    )
+                }
             }
         } else {
-            store.suggestLocation(receiveArticle)
+            try {
+                store.suggestLocation(receiveArticle)
+            } catch (offlineError: Exception) {
+                throw IllegalStateException(
+                    "Geen passende vrije locatie in de offline cache van ${state.workAreaName}. " +
+                        "Synchroniseer dit werkgebied één keer online. ${offlineError.message.orEmpty()}",
+                )
+            }
         }
         receiveSuggestedCode = location.optString("code")
         receiveSuggestedName = location.optString("display_name", receiveSuggestedCode)
