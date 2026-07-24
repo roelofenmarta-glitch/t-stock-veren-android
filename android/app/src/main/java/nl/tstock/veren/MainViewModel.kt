@@ -33,8 +33,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             pendingCount = store.pendingCount(),
             conflictCount = store.mutationCount("CONFLICT"),
             failedCount = store.mutationCount("FAILED"),
-            cachedLocationCount = store.locationCount(),
-            cachedBundleCount = store.bundleCount(),
+            cachedLocationCount = if (store.cachedWorkAreaKey() == (prefs.getString("work_area_key", "hoofdlocatie") ?: "hoofdlocatie")) store.locationCount() else 0,
+            cachedBundleCount = if (store.cachedWorkAreaKey() == (prefs.getString("work_area_key", "hoofdlocatie") ?: "hoofdlocatie")) store.bundleCount() else 0,
             lastSync = store.getMeta("last_sync", "Nog niet gesynchroniseerd"),
             workAreaKey = prefs.getString("work_area_key", "hoofdlocatie") ?: "hoofdlocatie",
             workAreaName = prefs.getString("work_area_name", "Hoofdlocatie") ?: "Hoofdlocatie",
@@ -59,9 +59,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var issueQuantity by mutableStateOf("")
     var issueReason by mutableStateOf("Productie")
     var stockSearch by mutableStateOf("")
-    var stockRows by mutableStateOf(store.stock())
+    var stockRows by mutableStateOf(store.stock(workAreaKey = state.workAreaKey))
     var locationSearch by mutableStateOf("")
-    var locationRows by mutableStateOf(store.locations())
+    var locationRows by mutableStateOf(store.locations(workAreaKey = state.workAreaKey))
     var mutationRows by mutableStateOf(store.mutationRows())
 
     init {
@@ -104,8 +104,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             pendingCount = store.pendingCount(),
             conflictCount = store.mutationCount("CONFLICT"),
             failedCount = store.mutationCount("FAILED"),
-            cachedLocationCount = store.locationCount(),
-            cachedBundleCount = store.bundleCount(),
+            cachedLocationCount = if (store.cachedWorkAreaKey() == (prefs.getString("work_area_key", "hoofdlocatie") ?: "hoofdlocatie")) store.locationCount() else 0,
+            cachedBundleCount = if (store.cachedWorkAreaKey() == (prefs.getString("work_area_key", "hoofdlocatie") ?: "hoofdlocatie")) store.bundleCount() else 0,
             lastSync = store.getMeta("last_sync", state.lastSync),
         )
     }
@@ -216,7 +216,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 refreshOfflineStats()
                 if (state.user != null && store.locationCount() == 0) {
                     state = state.copy(
-                        error = "Geen offline locaties opgeslagen. Verbind met de V10.5-server en druk bij Synchronisatie op Nu synchroniseren. ${e.message.orEmpty()}",
+                        error = "Geen offline locaties opgeslagen. Verbind met de V10.6-server en druk bij Synchronisatie op Nu synchroniseren. ${e.message.orEmpty()}",
                     )
                 }
             }
@@ -255,6 +255,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         state = state.copy(workAreaKey = area.key, workAreaName = area.name, message = "Werkgebied ingesteld op ${area.name}.", error = "")
         resetReceive()
         selectedBundle = null
+        stockRows = store.stock(stockSearch, area.key)
+        locationRows = store.locations(locationSearch, area.key)
+        refreshOfflineStats()
         if (state.online && state.user != null) rebuildOfflineCache()
     }
 
@@ -351,7 +354,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // lokale cache van het actieve werkgebied.
                 state = state.copy(online = false, syncState = "Offline")
                 try {
-                    store.suggestLocation(receiveArticle)
+                    store.suggestLocation(receiveArticle, state.workAreaKey)
                 } catch (offlineError: Exception) {
                     throw IllegalStateException(
                         "Server niet bereikbaar en geen passende vrije locatie in de offline cache van ${state.workAreaName}. " +
@@ -361,7 +364,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         } else {
             try {
-                store.suggestLocation(receiveArticle)
+                store.suggestLocation(receiveArticle, state.workAreaKey)
             } catch (offlineError: Exception) {
                 throw IllegalStateException(
                     "Geen passende vrije locatie in de offline cache van ${state.workAreaName}. " +
@@ -375,7 +378,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun receiveLocationIsCorrect(): Boolean =
-        store.locationCodesMatch(receiveSuggestedCode, receiveLocationScan)
+        store.locationCodesMatch(receiveSuggestedCode, receiveLocationScan, state.workAreaKey)
 
     fun receiveBundle() = runTask {
         val user = state.user ?: throw IllegalStateException("Log opnieuw in.")
@@ -390,6 +393,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             receiveReason,
             user.id,
             deviceUuid,
+            state.workAreaKey,
             serverConfirmedFree = receiveSuggestionConfirmedByServer && state.online,
         )
         refreshOfflineStats()
@@ -414,7 +418,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun findBundle() {
         try {
-            val rows = store.findBundles(findScan)
+            val rows = store.findBundles(findScan, state.workAreaKey)
             selectedBundle = rows.firstOrNull()
             state = if (selectedBundle == null) {
                 state.copy(error = "Geen actieve bundel gevonden in lokale gegevens.", message = "")
@@ -432,7 +436,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun moveBundle() = runTask {
         val bundle = selectedBundle ?: throw IllegalArgumentException("Scan en selecteer eerst een bundel.")
         val user = state.user ?: throw IllegalStateException("Log opnieuw in.")
-        store.moveOffline(bundle, moveLocationScan, moveReason, user.id)
+        store.moveOffline(bundle, moveLocationScan, moveReason, user.id, state.workAreaKey)
         refreshOfflineStats()
         state = state.copy(message = "Verplaatsing lokaal opgeslagen.")
         selectedBundle = null
@@ -444,7 +448,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun issueBundle() = runTask {
         val bundle = selectedBundle ?: throw IllegalArgumentException("Scan en selecteer eerst een bundel.")
         val user = state.user ?: throw IllegalStateException("Log opnieuw in.")
-        store.issueOffline(bundle, issueQuantity.toIntOrNull(), issueReason, user.id)
+        store.issueOffline(bundle, issueQuantity.toIntOrNull(), issueReason, user.id, state.workAreaKey)
         refreshOfflineStats()
         state = state.copy(message = "Uitboeking lokaal opgeslagen.")
         selectedBundle = null
@@ -454,12 +458,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshStock() {
-        stockRows = store.stock(stockSearch)
+        stockRows = store.stock(stockSearch, state.workAreaKey)
         refreshOfflineStats()
     }
 
     fun refreshLocations() {
-        locationRows = store.locations(locationSearch)
+        locationRows = store.locations(locationSearch, state.workAreaKey)
         refreshOfflineStats()
     }
 
@@ -509,11 +513,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             network.get("/api/mobile/bootstrap?profileKey=${state.offlineProfileKey}&workAreaKey=${state.workAreaKey}")
         } catch (e: NetworkException) {
             if (e.status == 404) {
-                throw IllegalStateException("De server heeft nog geen mobiele offline API. Installeer eerst T-Stock Veren Server V10.5.1 TEST of nieuwer.")
+                throw IllegalStateException("De server heeft nog geen mobiele offline API. Installeer eerst T-Stock Veren Server V10.6 TEST of nieuwer.")
             }
             throw e
         }
-        store.saveBootstrap(bootstrap)
+        store.saveBootstrap(bootstrap, state.workAreaKey)
         bootstrap.optJSONObject("profile")?.let { profile ->
             val key = profile.optString("key", state.offlineProfileKey)
             val name = profile.optString("name", state.offlineProfileName)
@@ -522,8 +526,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         registerDevice()
 
-        stockRows = store.stock(stockSearch)
-        locationRows = store.locations(locationSearch)
+        stockRows = store.stock(stockSearch, state.workAreaKey)
+        locationRows = store.locations(locationSearch, state.workAreaKey)
         mutationRows = store.mutationRows()
         refreshOfflineStats()
         state = state.copy(

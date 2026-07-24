@@ -45,7 +45,7 @@ class LauncherActivity : Activity() {
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         root.addView(TextView(this).apply {
-            text = "Start-veilige diagnoseversie 10.5.3"
+            text = "Start-veilige T-Stock Veren TEST 10.6"
             textSize = 14f
             setTextColor(Color.LTGRAY)
             gravity = Gravity.CENTER
