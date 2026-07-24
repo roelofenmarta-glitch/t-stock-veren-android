@@ -1,4 +1,4 @@
-name: Android APK V10.6.0 BETA
+name: Android APK V10.6.2 BETA
 
 on:
   workflow_dispatch:
@@ -33,14 +33,14 @@ jobs:
         run: |
           if [ -n "${ANDROID_KEYSTORE_PATH:-}" ]; then
             gradle -p android --no-daemon clean assembleBetaRelease
-            cp android/app/build/outputs/apk/beta/release/app-beta-release.apk android/t-stock-veren-v10.6.0-beta.apk
+            cp android/app/build/outputs/apk/beta/release/app-beta-release.apk android/t-stock-veren-v10.6.2-beta.apk
           else
             echo "Geen signing secrets: beta-debug APK voor interne test wordt gebouwd."
             gradle -p android --no-daemon clean assembleBetaDebug
-            cp android/app/build/outputs/apk/beta/debug/app-beta-debug.apk android/t-stock-veren-v10.6.0-beta-debug.apk
+            cp android/app/build/outputs/apk/beta/debug/app-beta-debug.apk android/t-stock-veren-v10.6.2-beta-debug.apk
           fi
       - uses: actions/upload-artifact@v4
         with:
-          name: T-Stock-Veren-V10.6.0-BETA
-          path: android/t-stock-veren-v10.6.0-beta*.apk
+          name: T-Stock-Veren-V10.6.2-BETA
+          path: android/t-stock-veren-v10.6.2-beta*.apk
           retention-days: 30

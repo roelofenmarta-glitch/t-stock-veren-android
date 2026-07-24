@@ -179,7 +179,7 @@ class LocalStore(context: Context) : SQLiteOpenHelper(
                     .put("occupied_article_number", "")
             } else {
                 location.put("occupied_bundle_id", occupiedBy.optLong("id"))
-                    .put("occupied_bundle_code", occupiedBy.optString("bundle_code"))
+                    .put("occupied_bundle_code", occupiedBy.optString("scan_code", occupiedBy.optString("article_number", occupiedBy.optString("bundle_code"))))
                     .put("occupied_article_number", occupiedBy.optString("article_number"))
             }
             saveLocation(db, location)
@@ -290,7 +290,7 @@ class LocalStore(context: Context) : SQLiteOpenHelper(
             if (occupied != null) {
                 throw IllegalStateException(
                     "Locatie ${location.optString("display_name", location.optString("code"))} is offline bezet door " +
-                        occupied.optString("bundle_code", occupied.optString("article_number", "een bundel")) + ".",
+                        occupied.optString("scan_code", occupied.optString("article_number", occupied.optString("bundle_code", "een bundel"))) + ".",
                 )
             }
         }
@@ -342,12 +342,14 @@ class LocalStore(context: Context) : SQLiteOpenHelper(
         val quantity = quantityOverride ?: defaultQuantity
         if (quantity <= 0) throw IllegalArgumentException("Aantal moet groter zijn dan 0.")
         if (quantity != defaultQuantity && correctionReason.isBlank()) throw IllegalArgumentException("Reden is verplicht bij afwijkend aantal.")
-        val bundleCode = bundleCodeInput.trim().uppercase().ifBlank { "MOB-${deviceUuid.takeLast(6)}-${System.currentTimeMillis()}" }
+        val scanCode = article.articleNumber
+        val requestedInternalReference = bundleCodeInput.trim().uppercase()
+        val bundleCode = if (requestedInternalReference.isNotBlank() && requestedInternalReference != scanCode) requestedInternalReference else "MOB-${deviceUuid.takeLast(6)}-${System.currentTimeMillis()}"
         val payload = JSONObject()
             .put("articleNumber", article.raw).put("suggestedLocationCode", suggested).put("scannedLocationCode", scanned)
-            .put("containerCode", containerCode.trim().uppercase()).put("bundleCode", bundleCode)
+            .put("containerCode", containerCode.trim().uppercase()).put("bundleCode", bundleCode).put("scanCode", scanCode)
             .put("quantityOverride", quantity).put("quantityCorrectionReason", correctionReason).put("userId", userId).put("workAreaKey", workAreaKey)
-        val bundle = JSONObject().put("id", -System.currentTimeMillis()).put("bundle_code", bundleCode).put("article_number", article.articleNumber)
+        val bundle = JSONObject().put("id", -System.currentTimeMillis()).put("bundle_code", bundleCode).put("scan_code", scanCode).put("article_number", article.articleNumber)
             .put("spring_type_code", article.springType).put("side", article.side).put("length_mm", article.lengthMm)
             .put("quantity_current", quantity).put("quantity_original", quantity).put("status", "IN_STOCK")
             .put("location_id", location.optLong("id")).put("location_code", location.optString("code"))
@@ -356,11 +358,11 @@ class LocalStore(context: Context) : SQLiteOpenHelper(
         try {
             queueMutation(db, "RECEIVE", payload)
             db.insertWithOnConflict("bundles", null, ContentValues().apply { put("bundle_code", bundleCode); put("json", bundle.toString()) }, SQLiteDatabase.CONFLICT_REPLACE)
-            location.put("occupied_bundle_id", bundle.optLong("id")).put("occupied_bundle_code", bundleCode).put("occupied_article_number", article.articleNumber)
+            location.put("occupied_bundle_id", bundle.optLong("id")).put("occupied_bundle_code", scanCode).put("occupied_article_number", article.articleNumber)
             saveLocation(db, location)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
-        return bundleCode
+        return scanCode
     }
 
     fun findBundles(scanInput: String, workAreaKey: String): List<JSONObject> {
@@ -372,7 +374,7 @@ class LocalStore(context: Context) : SQLiteOpenHelper(
             while (c.moveToNext()) {
                 val row = JSONObject(c.getString(0))
                 if (row.optString("work_area_key").trim().lowercase() != workAreaKey.trim().lowercase()) continue
-                if (row.optString("bundle_code").uppercase() == scan || row.optString("article_number").uppercase() == scan || row.optString("article_number").uppercase() == article || row.optString("location_code").uppercase() == scan) results += row
+                if (row.optString("scan_code", row.optString("article_number")).uppercase() == scan || row.optString("bundle_code").uppercase() == scan || row.optString("article_number").uppercase() == scan || row.optString("article_number").uppercase() == article || row.optString("location_code").uppercase() == scan) results += row
             }
         }
         return results.sortedByDescending { it.optString("updated_at", it.optString("created_at")) }
@@ -391,30 +393,52 @@ class LocalStore(context: Context) : SQLiteOpenHelper(
         try {
             queueMutation(db, "MOVE", payload)
             getLocation(bundle.optString("location_code"), workAreaKey)?.let { old -> old.put("occupied_bundle_id", JSONObject.NULL).put("occupied_bundle_code", "").put("occupied_article_number", ""); saveLocation(db, old) }
-            location.put("occupied_bundle_id", bundle.optLong("id")).put("occupied_bundle_code", bundle.optString("bundle_code")).put("occupied_article_number", bundle.optString("article_number")); saveLocation(db, location)
+            location.put("occupied_bundle_id", bundle.optLong("id")).put("occupied_bundle_code", bundle.optString("scan_code", bundle.optString("article_number"))).put("occupied_article_number", bundle.optString("article_number")); saveLocation(db, location)
             bundle.put("location_id", location.optLong("id")).put("location_code", location.optString("code")).put("location_display_name", location.optString("display_name")).put("status", "MOVED")
             saveBundle(db, bundle)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
     }
 
-    fun issueOffline(bundle: JSONObject, quantity: Int?, reason: String, userId: Long, workAreaKey: String) {
+    fun findIssueBundle(scanInput: String, scannedLocationCode: String, workAreaKey: String): JSONObject? {
+        if (scanInput.isBlank() || scannedLocationCode.isBlank()) return null
+        val location = getLocation(scannedLocationCode, workAreaKey) ?: return null
+        val canonicalLocation = location.optString("code")
+        return findBundles(scanInput, workAreaKey).firstOrNull { row ->
+            locationCodesMatch(row.optString("location_code"), canonicalLocation, workAreaKey)
+        }
+    }
+
+    fun issueOffline(bundle: JSONObject, confirmedBundleCode: String, scannedLocationCode: String, quantity: Int?, reason: String, userId: Long, workAreaKey: String) {
         ensureCacheFor(workAreaKey)
-        if (bundle.optString("work_area_key").trim().lowercase() != workAreaKey.trim().lowercase()) throw IllegalStateException("Deze bundel hoort bij een ander werkgebied.")
-        val current = bundle.optInt("quantity_current")
+        val checkedBundleCode = confirmedBundleCode.trim().uppercase()
+        val resolvedBundle = findIssueBundle(checkedBundleCode, scannedLocationCode, workAreaKey) ?: bundle
+        if (resolvedBundle.optString("work_area_key").trim().lowercase() != workAreaKey.trim().lowercase()) throw IllegalStateException("Deze bundel hoort bij een ander werkgebied.")
+        val expectedBundleCode = resolvedBundle.optString("scan_code", resolvedBundle.optString("article_number", resolvedBundle.optString("bundle_code"))).trim().uppercase()
+        if (checkedBundleCode.isBlank()) throw IllegalArgumentException("Scan het SG-nummer opnieuw ter controle.")
+        if (checkedBundleCode != expectedBundleCode) throw IllegalArgumentException("Verkeerde SG-code. Verwacht $expectedBundleCode.")
+        val expectedLocationCode = resolvedBundle.optString("location_code")
+        if (scannedLocationCode.isBlank()) throw IllegalArgumentException("Scan de huidige locatie van de bundel.")
+        if (!locationCodesMatch(expectedLocationCode, scannedLocationCode, workAreaKey)) {
+            throw IllegalArgumentException("Verkeerde locatie. Verwacht ${resolvedBundle.optString("location_display_name", expectedLocationCode)}.")
+        }
+        val confirmedLocation = getLocation(scannedLocationCode, workAreaKey)
+            ?: throw IllegalArgumentException("De gescande locatie staat niet in de offlinecache van dit werkgebied.")
+        val current = resolvedBundle.optInt("quantity_current")
         val issue = quantity ?: current
         if (issue <= 0 || issue > current) throw IllegalArgumentException("Ongeldig uitboekaantal.")
-        val payload = JSONObject().put("bundleId", bundle.optLong("id")).put("bundleCode", bundle.optString("bundle_code"))
+        val payload = JSONObject().put("bundleId", resolvedBundle.optLong("id")).put("bundleCode", resolvedBundle.optString("bundle_code"))
+            .put("confirmedBundleCode", checkedBundleCode).put("scannedLocationCode", confirmedLocation.optString("code"))
             .put("quantity", issue).put("issueMode", if (issue == current) "bundle" else "quantity").put("reason", reason).put("userId", userId).put("workAreaKey", workAreaKey)
         val db = writableDatabase; db.beginTransaction()
         try {
             queueMutation(db, "ISSUE", payload)
             val left = current - issue
             if (left == 0) {
-                db.delete("bundles", "bundle_code=?", arrayOf(bundle.optString("bundle_code")))
-                getLocation(bundle.optString("location_code"), workAreaKey)?.let { loc -> loc.put("occupied_bundle_id", JSONObject.NULL).put("occupied_bundle_code", "").put("occupied_article_number", ""); saveLocation(db, loc) }
+                db.delete("bundles", "bundle_code=?", arrayOf(resolvedBundle.optString("bundle_code")))
+                getLocation(resolvedBundle.optString("location_code"), workAreaKey)?.let { loc -> loc.put("occupied_bundle_id", JSONObject.NULL).put("occupied_bundle_code", "").put("occupied_article_number", ""); saveLocation(db, loc) }
             } else {
-                bundle.put("quantity_current", left).put("status", "PARTLY_USED"); saveBundle(db, bundle)
+                resolvedBundle.put("quantity_current", left).put("status", "PARTLY_USED"); saveBundle(db, resolvedBundle)
             }
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
@@ -511,7 +535,7 @@ class LocalStore(context: Context) : SQLiteOpenHelper(
             while (c.moveToNext()) {
                 val row = JSONObject(c.getString(0));
                 if (row.optString("work_area_key").trim().lowercase() != workAreaKey.trim().lowercase()) continue
-                if (search.isBlank() || row.optString("article_number").uppercase().contains(search) || row.optString("bundle_code").uppercase().contains(search) || row.optString("location_code").uppercase().contains(search)) rows += row
+                if (search.isBlank() || row.optString("article_number").uppercase().contains(search) || row.optString("scan_code", row.optString("article_number")).uppercase().contains(search) || row.optString("bundle_code").uppercase().contains(search) || row.optString("location_code").uppercase().contains(search)) rows += row
             }
         }
         return rows.sortedBy { it.optString("article_number") }

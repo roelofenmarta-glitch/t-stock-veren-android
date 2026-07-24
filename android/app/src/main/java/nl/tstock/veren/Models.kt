@@ -1,7 +1,7 @@
 package nl.tstock.veren
 
 enum class Screen { HOME, RECEIVE, MOVE, ISSUE, STOCK, LOCATIONS, SYNC, SETTINGS }
-enum class ScanTarget { ARTICLE, RECEIVE_LOCATION, FIND_BUNDLE, MOVE_LOCATION, STOCK_SEARCH }
+enum class ScanTarget { ARTICLE, RECEIVE_LOCATION, FIND_BUNDLE, MOVE_LOCATION, ISSUE_BUNDLE_CONFIRM, ISSUE_LOCATION, STOCK_SEARCH }
 
 data class UserSession(
     val id: Long,

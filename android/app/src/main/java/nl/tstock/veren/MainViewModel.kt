@@ -56,6 +56,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var selectedBundle by mutableStateOf<JSONObject?>(null)
     var moveLocationScan by mutableStateOf("")
     var moveReason by mutableStateOf("Interne verplaatsing")
+    var issueBundleScan by mutableStateOf("")
+    var issueLocationScan by mutableStateOf("")
     var issueQuantity by mutableStateOf("")
     var issueReason by mutableStateOf("Productie")
     var stockSearch by mutableStateOf("")
@@ -328,6 +330,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 findBundle()
             }
             ScanTarget.MOVE_LOCATION -> moveLocationScan = value.trim().uppercase()
+            ScanTarget.ISSUE_BUNDLE_CONFIRM -> issueBundleScan = value.trim().uppercase()
+            ScanTarget.ISSUE_LOCATION -> issueLocationScan = value.trim().uppercase()
             ScanTarget.STOCK_SEARCH -> {
                 stockSearch = value
                 refreshStock()
@@ -420,11 +424,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         try {
             val rows = store.findBundles(findScan, state.workAreaKey)
             selectedBundle = rows.firstOrNull()
+            issueBundleScan = ""
+            issueLocationScan = ""
             state = if (selectedBundle == null) {
                 state.copy(error = "Geen actieve bundel gevonden in lokale gegevens.", message = "")
             } else {
                 state.copy(
-                    message = "Bundel ${selectedBundle!!.optString("bundle_code")} gevonden.",
+                    message = "Bundel ${selectedBundle!!.optString("scan_code", selectedBundle!!.optString("article_number"))} gevonden.",
                     error = "",
                 )
             }
@@ -448,11 +454,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun issueBundle() = runTask {
         val bundle = selectedBundle ?: throw IllegalArgumentException("Scan en selecteer eerst een bundel.")
         val user = state.user ?: throw IllegalStateException("Log opnieuw in.")
-        store.issueOffline(bundle, issueQuantity.toIntOrNull(), issueReason, user.id, state.workAreaKey)
+        store.issueOffline(bundle, issueBundleScan, issueLocationScan, issueQuantity.toIntOrNull(), issueReason, user.id, state.workAreaKey)
         refreshOfflineStats()
         state = state.copy(message = "Uitboeking lokaal opgeslagen.")
         selectedBundle = null
         findScan = ""
+        issueBundleScan = ""
+        issueLocationScan = ""
         issueQuantity = ""
         if (state.online) syncAllInternal(showMessage = true)
     }
@@ -513,7 +521,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             network.get("/api/mobile/bootstrap?profileKey=${state.offlineProfileKey}&workAreaKey=${state.workAreaKey}")
         } catch (e: NetworkException) {
             if (e.status == 404) {
-                throw IllegalStateException("De server heeft nog geen mobiele offline API. Installeer eerst T-Stock Veren Server V10.6 TEST of nieuwer.")
+                throw IllegalStateException("De server heeft nog geen mobiele offline API. Installeer eerst T-Stock Veren Server V10.6.2 TEST of nieuwer.")
             }
             throw e
         }

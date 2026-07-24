@@ -1,4 +1,4 @@
-name: Android APK V10.6 TEST
+name: Android APK V10.6.2 TEST
 
 on:
   workflow_dispatch:
@@ -55,16 +55,16 @@ jobs:
         run: |
           if [ -n "${ANDROID_KEYSTORE_PATH:-}" ]; then
             gradle -p android --no-daemon clean assembleInternalRelease
-            cp android/app/build/outputs/apk/internal/release/app-internal-release.apk android/t-stock-veren-v10.6-test.apk
+            cp android/app/build/outputs/apk/internal/release/app-internal-release.apk android/t-stock-veren-v10.6.2-test.apk
           else
             echo "Geen signing secrets gevonden: aparte test-debug APK wordt gebouwd."
             gradle -p android --no-daemon clean assembleInternalDebug
-            cp android/app/build/outputs/apk/internal/debug/app-internal-debug.apk android/t-stock-veren-v10.6-test-debug.apk
+            cp android/app/build/outputs/apk/internal/debug/app-internal-debug.apk android/t-stock-veren-v10.6.2-test-debug.apk
           fi
 
       - name: TEST-APK publiceren als artifact
         uses: actions/upload-artifact@v4
         with:
-          name: T-Stock-Veren-V10.6-TEST
-          path: android/t-stock-veren-v10.6-test*.apk
+          name: T-Stock-Veren-V10.6.2-TEST
+          path: android/t-stock-veren-v10.6.2-test*.apk
           retention-days: 30

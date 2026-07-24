@@ -1,13 +1,9 @@
-# Android V10.6 TEST
+# T-Stock Veren Android V10.6.2 TEST
 
-- versionName: `10.6.0-test`
-- versionCode: `10600`
-- test applicationId: `nl.tstock.veren.test106`
-- appicoon: C-logo
-- GitHub artifact: `T-Stock-Veren-V10.6-TEST`
+Upload de inhoud van deze map naar GitHub. Start daarna de workflow **Android APK V10.6.2 TEST**.
 
-De offline cache is aan één werkgebied gekoppeld. Wisselen van werkgebied vraagt een nieuwe online synchronisatie.
-
-## GitHub
-Plaats `.github`, `android`, `scripts`, `assets` en `README.md` direct in de hoofdmap van de repository.
-Start daarna **Android APK V10.6 TEST** onder Actions.
+Belangrijk:
+- SG-nummer is de scanwaarde voor de bundel.
+- Camerascanner via de scan-knop in de app.
+- Online en offline inboeken gebruiken dezelfde SG-code.
+- Test application-id: `nl.tstock.veren.test1062`.

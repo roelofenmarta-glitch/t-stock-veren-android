@@ -50,6 +50,12 @@ private val Muted = Color(0xFF9CA8BA)
 private val Green = Color(0xFF45D477)
 private val Red = Color(0xFFFF6B6B)
 
+private fun sgScanCode(bundle: JSONObject?): String = bundle?.let { row ->
+    row.optString("scan_code").ifBlank {
+        row.optString("article_number").ifBlank { row.optString("bundle_code") }
+    }
+}?.trim()?.uppercase().orEmpty()
+
 class MainActivity : ComponentActivity() {
     private var vm: MainViewModel? = null
 
@@ -168,7 +174,7 @@ private fun LoggedInApp(vm: MainViewModel) {
     fun launchScan(target: ScanTarget) {
         vm.requestScan(target)
         scanner.launch(
-            ScanOptions().setPrompt("Scan artikel, bundel of locatie")
+            ScanOptions().setPrompt("Scan SG-code of locatiebarcode")
                 .setBeepEnabled(true)
                 .setOrientationLocked(false)
                 .setDesiredBarcodeFormats(ScanOptions.ALL_CODE_TYPES)
@@ -347,7 +353,6 @@ private fun ReceiveScreen(vm: MainViewModel, launchScan: (ScanTarget) -> Unit) {
             StepCard(1, "Scan artikel") {
                 ScanField("Artikelnummer", vm.receiveArticle, { vm.receiveArticle = it }, { launchScan(ScanTarget.ARTICLE) }, "SG1234R-2500")
                 OutlinedTextField(vm.receiveContainer, { vm.receiveContainer = it }, label = { Text("Containercode (optioneel)") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(vm.receiveBundle, { vm.receiveBundle = it }, label = { Text("Bundelcode (optioneel)") }, modifier = Modifier.fillMaxWidth())
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(vm.receiveQuantity, { vm.receiveQuantity = it.filter(Char::isDigit) }, label = { Text("Aantal (leeg = standaard)") }, modifier = Modifier.weight(1f))
                     OutlinedTextField(vm.receiveReason, { vm.receiveReason = it }, label = { Text("Reden correctie") }, modifier = Modifier.weight(1f))
@@ -374,8 +379,8 @@ private fun ReceiveScreen(vm: MainViewModel, launchScan: (ScanTarget) -> Unit) {
 private fun MoveScreen(vm: MainViewModel, launchScan: (ScanTarget) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            ScreenTitle("Bundel verplaatsen", "Scan de bundel of huidige locatie en daarna de nieuwe vrije locatie.")
-            StepCard(1, "Zoek bundel") { ScanField("Bundel / artikel / locatie", vm.findScan, { vm.findScan = it }, { launchScan(ScanTarget.FIND_BUNDLE) }, "Scan code"); Button(onClick = vm::findBundle, modifier = Modifier.fillMaxWidth()) { Text("Zoeken") } }
+            ScreenTitle("Bundel verplaatsen", "Scan de SG-code of huidige locatie en daarna de nieuwe vrije locatie.")
+            StepCard(1, "Zoek bundel") { ScanField("SG-code / locatie", vm.findScan, { vm.findScan = it }, { launchScan(ScanTarget.FIND_BUNDLE) }, "Scan code"); Button(onClick = vm::findBundle, modifier = Modifier.fillMaxWidth()) { Text("Zoeken") } }
             vm.selectedBundle?.let { BundleCard(it) }
             StepCard(2, "Nieuwe locatie") { ScanField("Nieuwe locatie", vm.moveLocationScan, { vm.moveLocationScan = it.uppercase() }, { launchScan(ScanTarget.MOVE_LOCATION) }, "Scan locatiecode"); OutlinedTextField(vm.moveReason, { vm.moveReason = it }, label = { Text("Reden") }, modifier = Modifier.fillMaxWidth()) }
         }
@@ -385,17 +390,30 @@ private fun MoveScreen(vm: MainViewModel, launchScan: (ScanTarget) -> Unit) {
 
 @Composable
 private fun IssueScreen(vm: MainViewModel, launchScan: (ScanTarget) -> Unit) {
+    val selected = vm.selectedBundle
+    val expectedBundle = sgScanCode(selected)
+    val expectedLocation = selected?.let { it.optString("location_display_name", it.optString("location_code")) }.orEmpty()
+    val bundleOk = selected != null && vm.issueBundleScan.trim().uppercase() == expectedBundle
+    val locationOk = selected != null && vm.store.findIssueBundle(vm.issueBundleScan, vm.issueLocationScan, vm.state.workAreaKey) != null
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            ScreenTitle("Bundel uitboeken", "Standaard wordt de complete bundel uitgeboekt, gelijk aan V10.")
-            StepCard(1, "Scan bundel") { ScanField("Bundel / artikel / locatie", vm.findScan, { vm.findScan = it }, { launchScan(ScanTarget.FIND_BUNDLE) }, "Scan code"); Button(onClick = vm::findBundle, modifier = Modifier.fillMaxWidth()) { Text("Zoeken") } }
-            vm.selectedBundle?.let { BundleCard(it) }
-            StepCard(2, "Uitgifte") {
+            ScreenTitle("Bundel uitboeken", "Scan het SG-nummer én de huidige locatie opnieuw voordat uitboeken mogelijk is.")
+            StepCard(1, "Zoek bundel") { ScanField("SG-code / locatie", vm.findScan, { vm.findScan = it }, { launchScan(ScanTarget.FIND_BUNDLE) }, "Scan code"); Button(onClick = vm::findBundle, modifier = Modifier.fillMaxWidth()) { Text("Zoeken") } }
+            selected?.let { BundleCard(it) }
+            StepCard(2, "Controle SG-nummer") {
+                ScanField("Scan SG-nummer opnieuw", vm.issueBundleScan, { vm.issueBundleScan = it.uppercase() }, { launchScan(ScanTarget.ISSUE_BUNDLE_CONFIRM) }, "SG-code")
+                if (vm.issueBundleScan.isNotBlank()) StatusBox(if (bundleOk) "SG-controle klopt." else "Verkeerde SG-code. Verwacht $expectedBundle.", bundleOk)
+            }
+            StepCard(3, "Controle locatie") {
+                ScanField("Scan huidige locatie", vm.issueLocationScan, { vm.issueLocationScan = it.uppercase() }, { launchScan(ScanTarget.ISSUE_LOCATION) }, "Locatiecode")
+                if (vm.issueLocationScan.isNotBlank()) StatusBox(if (locationOk) "Locatiecontrole klopt." else "Verkeerde locatie. Verwacht $expectedLocation.", locationOk)
+            }
+            StepCard(4, "Uitgifte") {
                 OutlinedTextField(vm.issueQuantity, { vm.issueQuantity = it.filter(Char::isDigit) }, label = { Text("Aantal (leeg = complete bundel)") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(vm.issueReason, { vm.issueReason = it }, label = { Text("Reden / doel") }, modifier = Modifier.fillMaxWidth())
             }
         }
-        Surface(shadowElevation = 10.dp, color = CardDark) { Button(onClick = vm::issueBundle, enabled = vm.selectedBundle != null, modifier = Modifier.fillMaxWidth().padding(16.dp).height(58.dp)) { Text(if (vm.state.online) "Uitboeken" else "Offline uitboeking opslaan", fontWeight = FontWeight.Bold) } }
+        Surface(shadowElevation = 10.dp, color = CardDark) { Button(onClick = vm::issueBundle, enabled = selected != null && bundleOk && locationOk, modifier = Modifier.fillMaxWidth().padding(16.dp).height(58.dp)) { Text(if (vm.state.online) "Uitboeken" else "Offline uitboeking opslaan", fontWeight = FontWeight.Bold) } }
     }
 }
 
@@ -403,7 +421,7 @@ private fun IssueScreen(vm: MainViewModel, launchScan: (ScanTarget) -> Unit) {
 private fun StockScreen(vm: MainViewModel, launchScan: (ScanTarget) -> Unit) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         ScreenTitle("Voorraad zoeken", "De laatst gesynchroniseerde voorraad is ook offline beschikbaar.")
-        ScanField("Zoeken", vm.stockSearch, { vm.stockSearch = it; vm.refreshStock() }, { launchScan(ScanTarget.STOCK_SEARCH) }, "Artikel, bundel of locatie")
+        ScanField("Zoeken", vm.stockSearch, { vm.stockSearch = it; vm.refreshStock() }, { launchScan(ScanTarget.STOCK_SEARCH) }, "SG-code of locatie")
         Spacer(Modifier.height(10.dp))
         Text("${vm.stockRows.size} bundels", color = Muted)
         LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 10.dp)) {
@@ -589,7 +607,7 @@ private fun BundleCard(bundle: JSONObject) {
     ElevatedCard(Modifier.fillMaxWidth(), colors = CardDefaults.elevatedCardColors(containerColor = CardDark)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(bundle.optString("article_number"), fontWeight = FontWeight.Black, color = Yellow); Text("${bundle.optInt("quantity_current")} st.", fontWeight = FontWeight.Bold) }
-            Text("Bundel: ${bundle.optString("bundle_code")}", color = Muted)
+            Text("SG-code: ${sgScanCode(bundle)}", color = Muted)
             Text("Locatie: ${bundle.optString("location_display_name", bundle.optString("location_code","-"))}")
             Text("Type ${bundle.optString("spring_type_code")} · ${bundle.optInt("length_mm")} mm · ${bundle.optString("side")}", color = Muted, fontSize = 12.sp)
         }
